@@ -4,3 +4,6 @@
 [submodule "ext/VulkanMemoryAllocator"]
 	path = ext/VulkanMemoryAllocator
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+[submodule "ext/SPIRV-Reflect"]
+	path = ext/SPIRV-Reflect
+	url = https://github.com/KhronosGroup/SPIRV-Reflect.git

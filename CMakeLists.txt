@@ -10,6 +10,10 @@ if (WIN32)
    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
 endif()
 
+set(SPIRV_REFLECT_EXECUTABLE OFF)
+set(SPIRV_REFLECT_STATIC_LIB ON)
+
+add_subdirectory(ext/SPIRV-Reflect)
 add_subdirectory(ext/volk)
 add_subdirectory(ext/VulkanMemoryAllocator)
 add_subdirectory(lib)

@@ -52,10 +52,12 @@ namespace vkrt {
 		uint32_t m_pd_count = 0;
 		std::vector<Device> m_devices;
 		std::vector<const char*> m_validation_layers = { "VK_LAYER_KHRONOS_validation" };
+		std::vector<const char*> m_extension_names;
 		VkDebugUtilsMessengerEXT m_debugMessenger;
 
 		bool checkValidationLayerSupport() 
 		{
+#ifdef _DEBUG
 			uint32_t layerCount;
 			vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
 
@@ -75,7 +77,12 @@ namespace vkrt {
 				if (!layerFound) 
 					return false;
 			}
+
+			m_extension_names.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);			
 			return true;
+#else 
+			return false;
+#endif
 		}
 
 	public:
@@ -94,7 +101,7 @@ namespace vkrt {
 			createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 			createInfo.pApplicationInfo = &appInfo;
 
-			if (!checkValidationLayerSupport())
+			if (checkValidationLayerSupport())
 			{
 				VkDebugUtilsMessengerCreateInfoEXT debugCreateInfo = {};
 				debugCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -105,6 +112,8 @@ namespace vkrt {
 
 				createInfo.enabledLayerCount = static_cast<uint32_t>(m_validation_layers.size());
 				createInfo.ppEnabledLayerNames = m_validation_layers.data();
+				createInfo.enabledExtensionCount = static_cast<uint32_t>(m_extension_names.size());
+				createInfo.ppEnabledExtensionNames = m_extension_names.data();
 				createInfo.pNext = (VkDebugUtilsMessengerCreateInfoEXT*)&debugCreateInfo;
 
 				CHECK_RESULT(vkCreateInstance(&createInfo, nullptr, &m_instance), "failed to create instance");
