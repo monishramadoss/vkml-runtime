@@ -16,6 +16,8 @@
 #include <map>
 #include <memory>
 #include <vector>
+#include <unordered_map>
+#include <functional>
 
 #include "vk_pgrm.h"
 
@@ -62,7 +64,8 @@ namespace vkrt {
 		VkPhysicalDevice m_pDev;
 
 		VmaAllocator m_allocator;
-		std::map<VkQueueFlags, queue> m_queue_map;
+		std::vector<queue> m_queues;
+		std::multimap< VkQueueFlags, uint32_t> m_queue_map;
 		std::map<uint32_t, std::pair<VkBuffer, VmaAllocation>> m_buffers;
 		std::map<uint32_t, std::pair<VkImage, VmaAllocation>> m_images;
 		std::map<uint32_t, VkBufferView> m_buffer_views;
@@ -74,7 +77,21 @@ namespace vkrt {
 		void setupQueues(std::vector< VkQueueFamilyProperties >& queueFamilies) {
 			for (uint32_t i = 0; i < queueFamilies.size(); ++i)
 			{
-				m_queue_map.emplace(queueFamilies[i].queueFlags, queue(i, m_dev, queueFamilies[i]));
+				m_queues.emplace_back(i, m_dev, queueFamilies[i]);
+				if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)
+					m_queue_map.emplace(std::make_pair(VK_QUEUE_GRAPHICS_BIT, i));
+				if(queueFamilies[i].queueFlags & VK_QUEUE_COMPUTE_BIT)
+					m_queue_map.emplace(std::make_pair(VK_QUEUE_COMPUTE_BIT, i));
+				if (queueFamilies[i].queueFlags & VK_QUEUE_TRANSFER_BIT)
+					m_queue_map.emplace(std::make_pair(VK_QUEUE_TRANSFER_BIT, i));
+				if (queueFamilies[i].queueFlags & VK_QUEUE_SPARSE_BINDING_BIT)
+					m_queue_map.emplace(std::make_pair(VK_QUEUE_SPARSE_BINDING_BIT, i));
+				if (queueFamilies[i].queueFlags & VK_QUEUE_PROTECTED_BIT)
+					m_queue_map.emplace(std::make_pair(VK_QUEUE_PROTECTED_BIT, i));
+				if (queueFamilies[i].queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR)
+					m_queue_map.emplace(std::make_pair(VK_QUEUE_VIDEO_DECODE_BIT_KHR, i));
+				if (queueFamilies[i].queueFlags & VK_QUEUE_VIDEO_ENCODE_BIT_KHR)
+					m_queue_map.emplace(std::make_pair(VK_QUEUE_VIDEO_ENCODE_BIT_KHR, i));
 			}
 		}
 
@@ -199,7 +216,7 @@ namespace vkrt {
 			m_pipeline_cache = other.m_pipeline_cache;
 			m_pDev = other.m_pDev;
 			m_allocator = other.m_allocator;
-			m_queue_map = other.m_queue_map;
+			m_queues = other.m_queues;
 			m_buffers = other.m_buffers;
 			m_images = other.m_images;
 			m_buffer_views = other.m_buffer_views;
@@ -214,7 +231,7 @@ namespace vkrt {
 			m_pipeline_cache = other.m_pipeline_cache;
 			m_pDev = other.m_pDev;
 			m_allocator = other.m_allocator;
-			m_queue_map = other.m_queue_map;
+			m_queues = other.m_queues;
 			m_buffers = other.m_buffers;
 			m_images = other.m_images;
 			m_buffer_views = other.m_buffer_views;
@@ -305,6 +322,8 @@ namespace vkrt {
 			for (auto& id_img_view : m_image_views)
 				destroy_image_view(id_img_view.second);
 
+			for (auto& q : m_queues)
+				q.destroy(m_dev);
 			m_desc_layout_cache.destory(m_dev);
 			m_desc_pool_alloc.destory(m_dev);
 			vmaDestroyAllocator(m_allocator);
@@ -349,17 +368,23 @@ namespace vkrt {
 		void destroyShaderModule(VkShaderModule* shaderModule) const {
 			vkDestroyShaderModule(m_dev, *shaderModule, nullptr);
 		}
-
-		
+				
 		void getPipeline(VkComputePipelineCreateInfo* stageInfo, VkPipeline* pipeline) {
 			vkCreateComputePipelines(m_dev, m_pipeline_cache, 1, stageInfo, nullptr, pipeline);
 		}
 
 		void getPipelineLayout(VkPipelineLayoutCreateInfo* layoutInfo, VkPipelineLayout* layout) {
 			vkCreatePipelineLayout(m_dev, layoutInfo, nullptr, layout);
+		}		
+
+		void getCmdBuffer(VkShaderStageFlagBits shaderFlag, VkCommandBuffer* cmdBuffer) {
+			switch (shaderFlag) {
+			case VK_SHADER_STAGE_COMPUTE_BIT:
+				auto tmp = m_queue_map.equal_range(VK_QUEUE_COMPUTE_BIT);
+				*cmdBuffer = m_queues[tmp.first->second].get_cmd_buffer();
+				break;
+			}
 		}
-
-
 
 	};
 
@@ -606,9 +631,6 @@ namespace vkrt {
 				bufMemBarrier.offset = 0;
 				bufMemBarrier.size = VK_WHOLE_SIZE;
 			}
-			else {
-
-			}
 
 		}
 
@@ -645,13 +667,12 @@ namespace vkrt {
 	class pgrm {
 		VkFence* m_fence = nullptr;
 		VkSubmitInfo m_submit_info = {};
-		VkCommandBuffer m_cmd_buffer = nullptr;
-		VkCommandPool m_cmd_pool = nullptr;
-
+		VkCommandBuffer* m_cmd = nullptr;
 		VkPipeline m_pipeline = nullptr;
 		VkPipelineLayout m_pipeline_layout = nullptr;
 
 		VkShaderModule m_module;
+		SpvReflectShaderModule m_spv_module = {};
 		typedef struct set {
 			std::vector< VkDescriptorSetLayoutBinding> bindings;
 			std::vector< VkWriteDescriptorSet> writes;
@@ -660,9 +681,7 @@ namespace vkrt {
 		} set_t;
 
 		std::vector<set_t> m_sets;
-
 		Device* m_dev = nullptr;
-
 
 	public:
 
@@ -671,13 +690,13 @@ namespace vkrt {
 			m_dev = &dev;
 			m_dev->getShaderModule(code, &m_module);
 
-			SpvReflectShaderModule module = {};
-			SpvReflectResult result = spvReflectCreateShaderModule(code.size() * sizeof(uint32_t), code.data(), &module);
+			
+			SpvReflectResult result = spvReflectCreateShaderModule(code.size() * sizeof(uint32_t), code.data(), &m_spv_module);
 			uint32_t count = 0;
-			result = spvReflectEnumerateDescriptorSets(&module, &count, NULL);
+			result = spvReflectEnumerateDescriptorSets(&m_spv_module, &count, NULL);
 			std::vector<SpvReflectDescriptorSet*> sets(count);
 			m_sets.resize(count);
-			result = spvReflectEnumerateDescriptorSets(&module, &count, sets.data());
+			result = spvReflectEnumerateDescriptorSets(&m_spv_module, &count, sets.data());
 			size_t l = 0;
 			for (size_t i = 0; i < sets.size(); ++i) {
 				const SpvReflectDescriptorSet& refl_set = *(sets[i]);
@@ -694,7 +713,7 @@ namespace vkrt {
 
 					for (uint32_t k = 0; k < refl_binding.array.dims_count; ++k)
 						binding.descriptorCount *= refl_binding.array.dims[k];
-					binding.stageFlags = static_cast<VkShaderStageFlagBits>(module.shader_stage);
+					binding.stageFlags = static_cast<VkShaderStageFlagBits>(m_spv_module.shader_stage);
 
 					auto& write = set.writes[j];
 					write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -714,9 +733,9 @@ namespace vkrt {
 
 			VkPipelineShaderStageCreateInfo stageInfo{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
 			stageInfo.pNext = nullptr;
-			stageInfo.stage = static_cast<VkShaderStageFlagBits>(module.shader_stage);
+			stageInfo.stage = static_cast<VkShaderStageFlagBits>(m_spv_module.shader_stage);
 			stageInfo.module = m_module;
-			stageInfo.pName = module.entry_point_name;
+			stageInfo.pName = m_spv_module.entry_point_name;
 
 			VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 			layoutInfo.pNext = nullptr;
@@ -730,17 +749,18 @@ namespace vkrt {
 
 			m_dev->getPipelineLayout(&layoutInfo, &m_pipeline_layout);
 
-			switch (stageInfo.stage) {
+			switch (static_cast<VkShaderStageFlagBits>(m_spv_module.shader_stage)) {
 			case VK_SHADER_STAGE_COMPUTE_BIT:
 				VkComputePipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
 				pipelineInfo.pNext = nullptr;
 				pipelineInfo.stage = stageInfo;
 				pipelineInfo.layout = m_pipeline_layout;
 				m_dev->getPipeline(&pipelineInfo, &m_pipeline);
+				m_dev->getCmdBuffer(stageInfo.stage, m_cmd);
 				break;
-
 			};
 
+		
 		}
 
 		~pgrm() {
