@@ -6,6 +6,22 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(VKRT_USE_VULKAN_SDK "Use Vulkan SDK" ON)
+
+
+if(VKRT_USE_VULKAN_SDK)
+    find_package(Vulkan REQUIRED)
+    if(NOT Vulkan_FOUND)
+        set(VKRT_USE_VULKAN_SDK OFF)
+        message( "Vulkan SDK not found")
+    else ()
+        set(ENV{VULKAN_SDK} ENV{VK_LAYER_PATH})
+        message( "Vulkan SDK found: $VULKAN_SDK")
+
+    endif()
+
+endif()
+
+
 if (WIN32)
    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
 endif()

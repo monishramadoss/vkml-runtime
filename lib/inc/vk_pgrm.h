@@ -3,8 +3,11 @@
 #include <optional>
 #include <unordered_map>
 #include <vector>
+#include <bitset>
+#include <cmath>
 #include <vulkan/vulkan.h>
 
+const int MAX_COUNT = 32;
 namespace vkrt {
 	class Device;
 	class StorageBuffer;
@@ -13,14 +16,37 @@ namespace vkrt {
 	class queue {
 		VkQueueFamilyProperties m_properties;
 		std::vector<VkQueue> m_queues;
+		std::vector<VkCommandPool> m_command_pools;
+		std::unordered_map<size_t, std::vector<VkCommandBuffer>> m_command_buffers;
+		std::vector<uint32_t> m_command_buffer_busy;
 		std::vector<VkFence> m_fences;
 		uint32_t m_idx;
+
+		void generate_command(VkDevice device, uint32_t idx) {
+			VkCommandPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+			poolInfo.pNext = nullptr;
+			poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+			poolInfo.queueFamilyIndex = m_idx;
+			vkCreateCommandPool(device, &poolInfo, nullptr, &m_command_pools[idx]);
+			VkCommandBufferAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+			allocInfo.pNext = nullptr;
+			allocInfo.commandPool = m_command_pools[idx];
+			allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+			allocInfo.commandBufferCount = 32;
+			m_command_buffers[idx].resize(allocInfo.commandBufferCount);
+			vkAllocateCommandBuffers(device, &allocInfo, m_command_buffers[idx].data());
+			m_command_buffer_busy[idx] = 0;
+		}
+
 
 	public:
 		queue(uint32_t idx, VkDevice device, VkQueueFamilyProperties& properties) : m_properties(properties), m_idx(idx) {
 			m_queues.resize(properties.queueCount);
 			m_fences.resize(properties.queueCount);
+			m_command_pools.resize(properties.queueCount, nullptr);
+			m_command_buffer_busy.resize(properties.queueCount);
 			vkGetDeviceQueue(device, idx, 0, &m_queues[0]);
+			generate_command(device, 0);			
 		}
 
 		bool isGraphicFamily() const { return m_properties.queueFlags & VK_QUEUE_GRAPHICS_BIT; }
@@ -34,9 +60,39 @@ namespace vkrt {
 				VK_QUEUE_SPARSE_BINDING_BIT & VK_QUEUE_VIDEO_DECODE_BIT_KHR &
 				VK_QUEUE_VIDEO_ENCODE_BIT_KHR) & m_properties.queueFlags;
 		}
+		
+		auto get_pool() { return m_command_pools[0]; }
 
-		void submit() {
+		void find_free(const std::vector<uint32_t>& freeFlags, size_t qIdx, uint32_t cIdx) {
+			qIdx = 0;
+			for (uint32_t flags : freeFlags){
+				if (flags != UINT32_MAX)
+				{
+					cIdx = log2<uint32_t>(flags & -flags) + 1;
+					break;
+				}
+				++qIdx;
+			}
+			cIdx = UINT32_MAX;
+			qIdx = UINT64_MAX;
+		}
 
+		auto get_cmd_buffer() {
+			size_t qIdx = 0;
+			uint32_t cIdx = 0;
+			find_free(m_command_buffer_busy, qIdx, cIdx);
+			return m_command_buffers[qIdx][cIdx];
+		}
+		auto get_idx() const { return m_idx; }
+
+		void destroy(VkDevice device) {
+			for (size_t i = 0; i < m_command_pools.size(); ++i) {
+				if (m_command_pools[i] != nullptr)
+				{
+					vkFreeCommandBuffers(device, m_command_pools[i], m_command_buffers[i].size(), m_command_buffers[i].data());
+					vkDestroyCommandPool(device, m_command_pools[i], nullptr);
+				}
+			}
 		}
 
 	};

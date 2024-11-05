@@ -1,12 +1,5 @@
 
-if(VKRT_USE_VULKAN_SDK)
-    find_package(Vulkan REQUIRED)
 
-    if(NOT Vulkan_FOUND)
-        message(FATAL_ERROR "Vulkan SDK not found")
-    endif()
-
-endif()
 
 if (WIN32)
    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
