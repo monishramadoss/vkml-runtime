@@ -12,7 +12,7 @@
 #include <vector>
 #include <iostream>
 
-#include "vk_device.h"
+#include "vkrt.h"
 
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(
