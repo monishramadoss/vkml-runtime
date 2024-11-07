@@ -1,12 +1,11 @@
 
 
-
 if (WIN32)
    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
 endif()
 
 
-add_library( rt STATIC vkrt.cpp inc/vk_instance.h inc/vk_device.h inc/vk_buffer.h inc/vk_pgrm.h)
+add_library( rt STATIC vkrt.cpp inc/vk_instance.h inc/vkrt.h  inc/vka.h)
 target_include_directories(rt PUBLIC inc)
 add_library(rt::rt ALIAS rt)
 target_include_directories( rt PRIVATE ext/volk)
