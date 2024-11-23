@@ -3,192 +3,251 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <map>
-#include <optional>
-#include <spirv_reflect.h>
+
+#include <array>
+#include <bitset>
+#include <condition_variable>
+#include <future>
+#include <queue>
+#include <stdio.h>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-#include <vk_mem_alloc.h>
+#include <volk.h>
+constexpr int MAX_CMD_POOL_SZ = 4;
+constexpr int MAX_QUE_COUNT = 31;
+// TODO make submission thread, and command buffer generation thread;
+// TODO make a descriptor pool per thread;
 
-void print_statistic(VmaStatistics stats)
-{
-    printf("\t\t blockCount: %i \n", stats.blockCount);
-    printf("\t\t blockBytes: %lli \n", stats.blockBytes);
-    printf("\t\t allocationCount: %i \n", stats.allocationCount);
-    printf("\t\t allocationBytes: %lli \n", stats.allocationBytes);
-}
-
-void print_statistic(VmaDetailedStatistics stats)
-{
-    printf("\t unusedRangeCount: %i \n", stats.unusedRangeCount);
-    printf("\t unusedRangeSizeMin: %lli \n", stats.unusedRangeSizeMin);
-    printf("\t unusedRangeSizeMax %lli \n", stats.unusedRangeSizeMin);
-    printf("\t allocationSizeMin: %lli \n", stats.allocationSizeMin);
-    printf("\t allocationSizeMax: %lli \n", stats.allocationSizeMax);
-    print_statistic(stats.statistics);
-}
-
-void print_statistic(VmaTotalStatistics stats)
-{
-    for (int i = 0; i < VK_MAX_MEMORY_TYPES; ++i)
-    {
-        printf("\t memoryType [%i]\n", i);
-        print_statistic(stats.memoryType[i]);
-    }
-    for (int i = 0; i < VK_MAX_MEMORY_HEAPS; ++i)
-    {
-        printf("\t memoryHeap [%i]\n", i);
-        print_statistic(stats.memoryHeap[i]);
-    }
-    printf("\t total\n");
-    print_statistic(stats.total);
-}
-
-const int MAX_COUNT = 32;
-<<<<<<< HEAD
-namespace vkrt {
-class Device;
-class StorageBuffer;
-=======
 namespace vkrt
 {
->>>>>>> 7fc3dd2 (seventh commit)
+unsigned int getFirstSetBitPos(int n)
+{
+    return log2(n & -n) + 1;
+}
 
-class queue {
-  VkQueueFamilyProperties m_properties;
-  std::vector<VkQueue> m_queues;
-  std::vector<VkCommandPool> m_command_pools;
-  std::unordered_map<size_t, std::vector<VkCommandBuffer>> m_command_buffers;
-  std::vector<uint32_t> m_command_buffer_busy;
-  std::vector<VkFence> m_fences;
-  uint32_t m_idx;
+struct ComputePacket
+{
+    VkShaderStageFlagBits flags;
+    uint32_t x, y, z;
+    VkPipeline pipeline;
+    VkPipelineLayout layout;
+    VkSemaphore incomingSemaphore;
+    VkSemaphore outgoingSemaphore;
+    std::vector<VkDescriptorSet> sets;
+    std::shared_future<void> future;
+};
 
-  size_t m_queue_number = 0;
+template <typename T, size_t BufferSize> class threadsafe_queue
+{
+    std::mutex m_mutex;
+    std::condition_variable m_cond_full;
+    std::condition_variable m_cond_empty;
+    std::array<T, BufferSize + 1> m_queue;
+    std::atomic<size_t> m_start{0};
+    std::atomic<size_t> m_end{0};
 
-  void generate_command(VkDevice device, uint32_t idx) {
-    VkCommandPoolCreateInfo poolInfo = {
-        VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
-    poolInfo.pNext = nullptr;
-    poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    poolInfo.queueFamilyIndex = m_idx;
-    vkCreateCommandPool(device, &poolInfo, nullptr, &m_command_pools[idx]);
-    VkCommandBufferAllocateInfo allocInfo = {
-        VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-    allocInfo.pNext = nullptr;
-    allocInfo.commandPool = m_command_pools[idx];
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = 32;
-    m_command_buffers[idx].resize(allocInfo.commandBufferCount);
-    vkAllocateCommandBuffers(device, &allocInfo, m_command_buffers[idx].data());
-    m_command_buffer_busy[idx] = 0;
-    VkFenceCreateInfo fenceInfo = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    fenceInfo.pNext = nullptr;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-    vkCreateFence(device, &fenceInfo, nullptr, &m_fences[idx]);
-    ++m_queue_number;
-  }
-
-public:
-  queue(uint32_t idx, VkDevice device, VkQueueFamilyProperties &properties)
-      : m_properties(properties), m_idx(idx) {
-    m_queues.resize(properties.queueCount);
-    m_fences.resize(properties.queueCount);
-    m_command_pools.resize(properties.queueCount, nullptr);
-    m_command_buffer_busy.resize(properties.queueCount);
-    vkGetDeviceQueue(device, idx, 0, &m_queues[0]);
-    generate_command(device, 0);
-  }
-
-  bool isGraphicFamily() const {
-    return m_properties.queueFlags & VK_QUEUE_GRAPHICS_BIT;
-  }
-  bool isComputeFamily() const {
-    return m_properties.queueFlags & VK_QUEUE_COMPUTE_BIT;
-  }
-  bool isTransferFamily() const {
-    return m_properties.queueFlags & VK_QUEUE_TRANSFER_BIT;
-  }
-  bool isSparseBindingFamily() const {
-    return m_properties.queueFlags & VK_QUEUE_SPARSE_BINDING_BIT;
-  }
-  bool isVideoDecodeFamily() const {
-    return m_properties.queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR;
-  }
-  bool isVideoEncodeFamily() const {
-    return m_properties.queueFlags & VK_QUEUE_VIDEO_ENCODE_BIT_KHR;
-  }
-  bool isOtherFamily() const {
-    return ~(VK_QUEUE_TRANSFER_BIT & VK_QUEUE_COMPUTE_BIT &
-             VK_QUEUE_GRAPHICS_BIT & VK_QUEUE_SPARSE_BINDING_BIT &
-             VK_QUEUE_VIDEO_DECODE_BIT_KHR & VK_QUEUE_VIDEO_ENCODE_BIT_KHR) &
-           m_properties.queueFlags;
-  }
-
-  auto get_pool() { return m_command_pools[0]; }
-
-  void find_free(const std::vector<uint32_t> &freeFlags, size_t qIdx,
-                 uint32_t cIdx) {
-    qIdx = 0;
-    for (uint32_t flags : freeFlags) {
-      if (flags != UINT32_MAX) {
-        cIdx = log2<uint32_t>(flags & -flags) + 1;
-        break;
-      }
-      ++qIdx;
+    size_t increment(size_t idx) const
+    {
+        return (idx + 1) % (BufferSize + 1);
     }
-    cIdx = UINT32_MAX;
-    qIdx = UINT64_MAX;
-  }
 
-  void get_cmd_buffer(VkCommandBuffer *cmd_buffer, size_t &qIdx,
-                      uint32_t &cIdx) {
-    find_free(m_command_buffer_busy, qIdx, cIdx);
-    *cmd_buffer = m_command_buffers.at(qIdx).at(cIdx);
-  }
-  auto get_idx() const { return m_idx; }
-
-  void run(size_t i) {
-    VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-    submitInfo.pNext = nullptr;
-    submitInfo.commandBufferCount = m_command_buffers.at(i).size();
-    submitInfo.pCommandBuffers = m_command_buffers.at(i).data();
-    submitInfo.signalSemaphoreCount = 0;
-    submitInfo.waitSemaphoreCount = 0;
-    submitInfo.pWaitDstStageMask = nullptr;
-    submitInfo.pWaitSemaphores = nullptr;
-    submitInfo.pSignalSemaphores = nullptr;
-
-    vkQueueSubmit(m_queues[i], 1, &submitInfo, m_fences[i]);
-  }
-
-  void wait(VkDevice device, size_t i) {
-    vkWaitForFences(device, 1, &m_fences[i], VK_TRUE, UINT64_MAX);
-    vkResetFences(device, 1, &m_fences[i]);
-  }
-
-  void wait(VkDevice device) {
-    for (size_t i = 0; i < m_queue_number; ++i) {
-      wait(device, i);
+  public:
+    bool push(const T &packet)
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        m_cond_full.wait(lock, [this]() { return !isFull(); });
+        auto current_end = m_end.load();
+        m_queue[current_end] = packet;
+        m_end.store(increment(current_end));
+        m_cond_empty.notify_all();
+        return true;
     }
-  }
 
-  void destroy(VkDevice device) {
-    for (auto &fence : m_fences) {
-      if (fence != nullptr)
-        vkDestroyFence(device, fence, nullptr);
+    bool pop(T &packet, std::chrono::milliseconds timeout)
+    {
+        std::unique_lock<std::mutex> lock(m_mutex);
+        if (!m_cond_empty.wait_for(lock, timeout, [this]() { return !isEmpty(); }))
+        {
+            return false; // Timeout occurred
+        }
+
+        packet = m_queue[m_start];
+        m_start.store(increment(m_start.load()));
+        m_cond_full.notify_one();
+        return true;
     }
-    for (size_t i = 0; i < m_command_pools.size(); ++i) {
-      if (m_command_pools[i] != nullptr) {
-        vkFreeCommandBuffers(device, m_command_pools[i],
-                             m_command_buffers[i].size(),
-                             m_command_buffers[i].data());
-        vkDestroyCommandPool(device, m_command_pools[i], nullptr);
-      }
+
+    bool isEmpty() const
+    {
+        return m_start.load() == m_end.load();
     }
-  }
+
+    bool isFull() const
+    {
+        auto next_end = increment(m_end.load());
+        return next_end == m_start.load();
+    }
+};
+
+template <size_t N> struct cmd_t
+{
+    VkQueue m_queue;
+    VkFence m_fence;
+    VkCommandPool m_pool;
+    VkCommandBuffer m_primary_buffer;
+    VkCommandBuffer m_secondary_buffer[N];
+    std::bitset<N> m_working_map;
+    std::condition_variable m_cv;
+    threadsafe_queue<int, N> m_available_pool;
+    threadsafe_queue<int, N> m_ready_pool;
+    threadsafe_queue<int, N> m_working_pool;
+    std::promise<void> m_promise;
+
+    void generate_command(VkDevice device, uint32_t idx)
+    {
+        VkCommandPoolCreateInfo poolInfo = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        poolInfo.pNext = nullptr;
+        poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        poolInfo.queueFamilyIndex = m_idx;
+        vkCreateCommandPool(device, &poolInfo, nullptr, &m_command_pools[idx]);
+        VkCommandBufferAllocateInfo allocInfo = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        allocInfo.pNext = nullptr;
+        allocInfo.commandPool = m_command_pools[idx];
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 32;
+        m_command_buffers[idx].resize(allocInfo.commandBufferCount);
+        vkAllocateCommandBuffers(device, &allocInfo, m_command_buffers[idx].data());
+        m_command_buffer_busy[idx] = 0;
+        VkFenceCreateInfo fenceInfo = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        fenceInfo.pNext = nullptr;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        vkCreateFence(device, &fenceInfo, nullptr, &m_fences[idx]);
+        ++m_queue_number;
+    }
+
+  public:
+    queue(uint32_t idx, VkDevice device, VkQueueFamilyProperties &properties) : m_properties(properties), m_idx(idx)
+    {
+        m_queues.resize(properties.queueCount);
+        m_fences.resize(properties.queueCount);
+        m_command_pools.resize(properties.queueCount, nullptr);
+        m_command_buffer_busy.resize(properties.queueCount);
+        vkGetDeviceQueue(device, idx, 0, &m_queues[0]);
+        generate_command(device, 0);
+    }
+
+    bool isGraphicFamily() const
+    {
+        return m_properties.queueFlags & VK_QUEUE_GRAPHICS_BIT;
+    }
+    bool isComputeFamily() const
+    {
+        return m_properties.queueFlags & VK_QUEUE_COMPUTE_BIT;
+    }
+    bool isTransferFamily() const
+    {
+        return m_properties.queueFlags & VK_QUEUE_TRANSFER_BIT;
+    }
+    bool isSparseBindingFamily() const
+    {
+        return m_properties.queueFlags & VK_QUEUE_SPARSE_BINDING_BIT;
+    }
+    bool isVideoDecodeFamily() const
+    {
+        return m_properties.queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR;
+    }
+    bool isVideoEncodeFamily() const
+    {
+        return m_properties.queueFlags & VK_QUEUE_VIDEO_ENCODE_BIT_KHR;
+    }
+    bool isOtherFamily() const
+    {
+        return ~(VK_QUEUE_TRANSFER_BIT & VK_QUEUE_COMPUTE_BIT & VK_QUEUE_GRAPHICS_BIT & VK_QUEUE_SPARSE_BINDING_BIT &
+                 VK_QUEUE_VIDEO_DECODE_BIT_KHR & VK_QUEUE_VIDEO_ENCODE_BIT_KHR) &
+               m_properties.queueFlags;
+    }
+
+    auto get_pool()
+    {
+        return m_command_pools[0];
+    }
+
+    void find_free(const std::vector<uint32_t> &freeFlags, size_t qIdx, uint32_t cIdx)
+    {
+        qIdx = 0;
+        for (uint32_t flags : freeFlags)
+        {
+            if (flags != UINT32_MAX)
+            {
+                cIdx = log2<uint32_t>(flags & -flags) + 1;
+                break;
+            }
+            ++qIdx;
+        }
+        cIdx = UINT32_MAX;
+        qIdx = UINT64_MAX;
+    }
+
+    void get_cmd_buffer(VkCommandBuffer *cmd_buffer, size_t &qIdx, uint32_t &cIdx)
+    {
+        find_free(m_command_buffer_busy, qIdx, cIdx);
+        *cmd_buffer = m_command_buffers.at(qIdx).at(cIdx);
+    }
+    auto get_idx() const
+    {
+        return m_idx;
+    }
+
+    void run(size_t i)
+    {
+        VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        submitInfo.pNext = nullptr;
+        submitInfo.commandBufferCount = m_command_buffers.at(i).size();
+        submitInfo.pCommandBuffers = m_command_buffers.at(i).data();
+        submitInfo.signalSemaphoreCount = 0;
+        submitInfo.waitSemaphoreCount = 0;
+        submitInfo.pWaitDstStageMask = nullptr;
+        submitInfo.pWaitSemaphores = nullptr;
+        submitInfo.pSignalSemaphores = nullptr;
+
+        vkQueueSubmit(m_queues[i], 1, &submitInfo, m_fences[i]);
+    }
+
+    void wait(VkDevice device, size_t i)
+    {
+        vkWaitForFences(device, 1, &m_fences[i], VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &m_fences[i]);
+    }
+
+    void wait(VkDevice device)
+    {
+        for (size_t i = 0; i < m_queue_number; ++i)
+        {
+            wait(device, i);
+        }
+    }
+
+    void destroy(VkDevice device)
+    {
+        for (auto &fence : m_fences)
+        {
+            if (fence != nullptr)
+                vkDestroyFence(device, fence, nullptr);
+        }
+        for (size_t i = 0; i < m_command_pools.size(); ++i)
+        {
+            if (m_command_pools[i] != nullptr)
+            {
+                vkFreeCommandBuffers(device, m_command_pools[i], m_command_buffers[i].size(),
+                                     m_command_buffers[i].data());
+                vkDestroyCommandPool(device, m_command_pools[i], nullptr);
+            }
+        }
+    }
 };
 
 class DescriptorAllocator {
@@ -1326,7 +1385,6 @@ template <uint32_t x = 0, uint32_t y = 0, uint32_t z = 0> class Program
         vkCmdDispatch(m_cmd, x, y, z);
         vkEndCommandBuffer(m_cmd);
     }
->>>>>>> 7fc3dd2 (seventh commit)
 };
 
 } // namespace vkrt
