@@ -10,10 +10,10 @@ int main() {
 
 
 
-	auto& buf = vkrt::StorageBuffer(dev1, 65536, usageFlags);
-	auto& buf1 = vkrt::StorageBuffer(dev1, 65536, usageFlags);
+	auto& buf = vkrt::buffer(dev1, 65536, usageFlags);
+	auto& buf1 = vkrt::buffer(dev1, 65536, usageFlags);
 
-	auto& buf2 = vkrt::StorageBuffer(dev1, 1024, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+	auto& buf2 = vkrt::buffer(dev1, 1024, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
 
 
 	std::cout << buf.isLive() << std::endl;
