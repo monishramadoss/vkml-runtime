@@ -14,9 +14,13 @@ class ComputeProgram
     void record(uint32_t x) { record(x, 1, 1); }
     void record(uint32_t x, uint32_t y){ record(x, y, 1);}
 
-    
-
+    template <typename... T> void operator()(T &...args)
+    {
+        *this(0, args...);
+    }
+    template <typename... T> void operator()(size_t i, T &...args);
 };
+
 
 
 ComputeProgram::ComputeProgram(Device &dev, const std::vector<uint32_t> &code)
@@ -24,6 +28,8 @@ ComputeProgram::ComputeProgram(Device &dev, const std::vector<uint32_t> &code)
     m_dev = &dev;
     m_program = m_dev->construct(code);
 }
+
+
 
 inline void ComputeProgram::record(uint32_t x, uint32_t y, uint32_t z)
 {
@@ -37,6 +43,14 @@ inline void ComputeProgram::record(uint32_t x, uint32_t y, uint32_t z)
     packet.sets = m_program->sets;
     packet.n_sets = m_program->n_sets;
     m_dev->submit(packet);
+}
+
+template<typename T...>
+void ComputerProgram::operator()(size_t i, T &...args)
+{
+   m_dev->update(i, m_program, );
+    
+
 }
 
 } // namespace vkrt

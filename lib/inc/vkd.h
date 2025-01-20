@@ -168,16 +168,7 @@ class Device
         const std::vector<uint32_t> &code);
 
     void update(uint32_t set_id, std::shared_ptr<vkrt_compute_program> program,
-                std::vector<std::shared_ptr<vkrt_buffer>> &buffers) const
-    {
-        for (uint32_t j = 0; j < program->n_set_bindings[set_id]; ++j)
-        {
-            VkDescriptorBufferInfo desc_buffer_info = {buffers[j]->buffer, 0, buffers[j]->allocation_info.size};
-            program->writes[set_id][j].pBufferInfo = &desc_buffer_info;
-        }
-
-        vkUpdateDescriptorSets(m_dev, program->n_set_bindings[set_id], program->writes[set_id], 0, nullptr);
-    }
+                std::vector<std::shared_ptr<vkrt_buffer>> &buffers) const;
 
     size_t getMaxAllocationSize() const
     {
@@ -489,7 +480,17 @@ std::shared_ptr<vkrt_compute_program> Device::construct(
     return program;
 }
 
+void Device::update(uint32_t set_id, std::shared_ptr<vkrt_compute_program> program,
+            std::vector<std::shared_ptr<vkrt_buffer>> &buffers) const
+{
+    for (uint32_t j = 0; j < program->n_set_bindings[set_id]; ++j)
+    {
+        VkDescriptorBufferInfo desc_buffer_info = {buffers[j]->buffer, 0, buffers[j]->allocation_info.size};
+        program->writes[set_id][j].pBufferInfo = &desc_buffer_info;
+    }
 
+    vkUpdateDescriptorSets(m_dev, program->n_set_bindings[set_id], program->writes[set_id], 0, nullptr);
+}
 
 
 
