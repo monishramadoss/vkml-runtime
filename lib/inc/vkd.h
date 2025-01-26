@@ -97,6 +97,8 @@ class Device
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
         VkPhysicalDeviceVulkan13Properties device_vulkan13_properties = {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES};
+        VkPhysicalDeviceCooperativeMatrixPropertiesKHR cooperative_matrix_properties = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_KHR };
     } m_props;
 
     void getFeaturesAndProperties(VkPhysicalDevice &pd)
@@ -111,20 +113,11 @@ class Device
         m_props.device_vulkan11_properties.pNext = &m_props.device_vulkan12_properties;
         m_props.device_vulkan12_properties.pNext = &m_props.device_vulkan13_properties;
         m_props.device_vulkan13_properties.pNext = &m_props.subgroup_properties;
+        m_props.subgroup_properties.pNext = &m_props.cooperative_matrix_properties;
         vkGetPhysicalDeviceProperties2(pd, &m_props.device_properties_2);
     }
 
-    uint32_t supported_data_types() const
-    {
-        m_feats.features2.features.shaderFloat64;
-        m_feats.features2.features.shaderInt16;
-        m_feats.features2.features.shaderInt64;
-        m_feats.features12.shaderFloat16;
-        m_feats.features12.shaderInt8;
-        return 0;
-    }
-
-    void map_buffer(VmaAllocation alloc, void **data) const
+     void map_buffer(VmaAllocation alloc, void **data) const
     {
         vmaMapMemory(m_allocator, alloc, data);
     }
@@ -460,7 +453,72 @@ class Device
         return flags;
     }
 
-       
+    std::vector<std::string> getSupportedExtensions()
+    {
+        std::vector<VkExtensionProperties> extensions;
+        uint32_t ext_count = 0;
+        vkEnumerateDeviceExtensionProperties(m_pDev, nullptr, &ext_count, nullptr);
+        extensions.resize(ext_count);
+        vkEnumerateDeviceExtensionProperties(m_pDev, nullptr, &ext_count,
+                                             reinterpret_cast<VkExtensionProperties *>(extensions.data()));
+        std::vector<std::string> supported_extensions;
+        for (auto &ext : extensions)
+            supported_extensions.emplace_back(ext.extensionName);
+        return supported_extensions;
+    }
+
+    uint32_t getVendorID() const
+    {
+        return m_props.device_properties_2.properties.vendorID;
+    }
+
+    uint32_t getDeviceType() const
+    {
+        return m_props.device_properties_2.properties.deviceType;
+    }
+
+    std::vector<std::string> getDeviceCapabilities() const
+    {
+        std::vector<std::string> device_capabilities;
+
+        if (m_feats.features2.features.geometryShader)
+            device_capabilities.push_back("geometryShader");
+        if (m_feats.features2.features.tessellationShader)
+            device_capabilities.push_back("tessellationShader");
+        if (m_feats.features2.features.shaderInt16)
+            device_capabilities.push_back("shaderInt16");
+        if (m_feats.features2.features.shaderInt64)
+            device_capabilities.push_back("shaderInt64");
+        if (m_feats.features12.shaderFloat16)
+            device_capabilities.push_back("shaderFloat16");
+        if (m_feats.features12.shaderInt8)
+            device_capabilities.push_back("shaderInt8");
+        return device_capabilities;
+    }
+    
+    std::vector < std::string > getCoopMatrixfeatures()
+    {
+        std::vector<std::string> coop_matrix_capabilities;
+        if (m_feats.coo_matrix_features.cooperativeMatrixRobustBufferAccess)
+            coop_matrix_capabilities.push_back("cooperativeMatrixRobustBufferAccess");
+        if (m_feats.coo_matrix_features.cooperativeMatrix)
+            coop_matrix_capabilities.push_back("cooperativeMatrix");
+        return coop_matrix_capabilities;
+    }
+
+    std::vector<uint32_t> getResourceLimits() const
+    {
+        std::vector<uint32_t> resource_limits;
+        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeSharedMemorySize);
+        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeWorkGroupInvocations);
+        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeWorkGroupSize[0]);
+        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeWorkGroupSize[1]);
+        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeWorkGroupSize[2]);
+        resource_limits.push_back( m_props.subgroup_properties.subgroupSize);
+        resource_limits.push_back( m_props.device_vulkan13_properties.minSubgroupSize);
+        resource_limits.push_back( m_props.device_vulkan13_properties.maxSubgroupSize);        
+        return resource_limits;
+    }
 };
 
 } // namespace vkrt

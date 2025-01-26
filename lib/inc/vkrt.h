@@ -162,6 +162,11 @@ class Instance
         return m_devices.at(i);
     }
 
+    size_t get_device_count() const
+    {
+        return m_devices.size();
+    }
+
     ~Instance()
     {
         for (auto &dev : m_devices)
