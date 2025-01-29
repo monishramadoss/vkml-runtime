@@ -30,16 +30,22 @@ set(SPIRV_REFLECT_EXECUTABLE OFF)
 set(SPIRV_REFLECT_STATIC_LIB ON)
 
 add_subdirectory(ext/SPIRV-Reflect)
-add_subdirectory(ext/volk)
-add_subdirectory(ext/VulkanMemoryAllocator)
+include_directories(ext/SPIRV-Reflect)
 
-set(EXT_HEADERS 
+add_subdirectory(ext/volk)
+include_directories(ext/volk)
+
+add_subdirectory(ext/VulkanMemoryAllocator)
+include_directories(ext/VulkanMemoryAllocator/include)
+
+set(        
+    EXT_HEADERS 
     ext/volk
     ext/VulkanMemoryAllocator/include
     ext/SPIRV-Reflect
     ${Vulkan_INCLUDE_DIRS}
 )
-include_directories(${EXT_HEADERS})
+
 add_subdirectory(lib)
 
 set_property(GLOBAL PROPERTY VKRT_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/lib/inc ${EXT_HEADERS})
