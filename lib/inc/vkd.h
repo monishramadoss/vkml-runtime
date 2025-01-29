@@ -1,7 +1,9 @@
 #pragma once
 #include "vka.h"
-#include <vk_mem_alloc.h>
+#include "vke.h"
+#include <spirv_reflect.h>
 #include <thread>
+#include <vk_mem_alloc.h>
 
 namespace vkrt
 {
@@ -16,13 +18,9 @@ class Device
     VmaAllocator m_allocator;
     std::vector<std::shared_ptr<QueueDispatcher>> m_queues;
     std::multimap<VkQueueFlags, uint32_t> m_queue_map;
-    std::map<uint32_t, std::pair<VkBuffer, VmaAllocation>> m_buffers;
-    std::map<uint32_t, std::pair<VkImage, VmaAllocation>> m_images;
-    std::map<uint32_t, VkBufferView> m_buffer_views;
-    std::map<uint32_t, VkImageView> m_image_views;
-    std::map<uint32_t, VkShaderModule> m_shader_modules;
-    std::map<uint32_t, VkPipelineLayout> m_pipeline_layout;
-    std::map<uint32_t, VkPipeline> m_pipelines;
+
+    ExecutionGraph execGraph;
+
     // TODO make a descriptor pool per thread; and have thread access each one independentaly
 
     DescriptorAllocator *m_desc_pool_alloc;
@@ -97,8 +95,6 @@ class Device
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES};
         VkPhysicalDeviceVulkan13Properties device_vulkan13_properties = {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_PROPERTIES};
-        VkPhysicalDeviceCooperativeMatrixPropertiesKHR cooperative_matrix_properties = {
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_PROPERTIES_KHR };
     } m_props;
 
     void getFeaturesAndProperties(VkPhysicalDevice &pd)
@@ -113,11 +109,20 @@ class Device
         m_props.device_vulkan11_properties.pNext = &m_props.device_vulkan12_properties;
         m_props.device_vulkan12_properties.pNext = &m_props.device_vulkan13_properties;
         m_props.device_vulkan13_properties.pNext = &m_props.subgroup_properties;
-        m_props.subgroup_properties.pNext = &m_props.cooperative_matrix_properties;
         vkGetPhysicalDeviceProperties2(pd, &m_props.device_properties_2);
     }
 
-     void map_buffer(VmaAllocation alloc, void **data) const
+    uint32_t supported_data_types() const
+    {
+        m_feats.features2.features.shaderFloat64;
+        m_feats.features2.features.shaderInt16;
+        m_feats.features2.features.shaderInt64;
+        m_feats.features12.shaderFloat16;
+        m_feats.features12.shaderInt8;
+        return 0;
+    }
+
+    void map_buffer(VmaAllocation alloc, void **data) const
     {
         vmaMapMemory(m_allocator, alloc, data);
     }
@@ -125,6 +130,16 @@ class Device
     void unmap_buffer(VmaAllocation alloc) const
     {
         vmaUnmapMemory(m_allocator, alloc);
+    }
+
+    auto copyMemoryToBuffer(VmaAllocation dst, const void *src, size_t size, size_t dst_offset = 0) const
+    {
+        return vmaCopyMemoryToAllocation(m_allocator, src, dst, dst_offset, size);
+    }
+
+    auto copyBufferToMemory(VmaAllocation src, void *dst, size_t size, size_t src_offset = 0) const
+    {
+        return vmaCopyAllocationToMemory(m_allocator, src, src_offset, dst, size);
     }
 
     void allocate_buffer(VkBufferCreateInfo *bufferCreateInfo, VmaAllocationCreateInfo *vmaAllocCreateInfo,
@@ -144,114 +159,16 @@ class Device
             printf("Failed to find memory type index\n");
             return;
         }
-
-        if (buffer != nullptr && res == VK_SUCCESS)
-        {
-            *buffer_id = m_buffers.size();
-            m_buffers.emplace(*buffer_id, std::make_pair(*buffer, *allocation));
-        }
     }
 
-    void destroy_buffer(VkBuffer buffer, VmaAllocation allocation) const
-    {
-        vkDestroyBuffer(m_dev, buffer, nullptr);
-        vmaFreeMemory(m_allocator, allocation);
-    }
+    std::shared_ptr<vkrt_buffer> construct(const VkBufferCreateInfo *bufferCreateInfo,
+                                           VmaAllocationCreateInfo *vmaAllocCreateInfo);
 
-    void allocate_image(const VkImageCreateInfo *imageCreateInfo, VmaAllocationCreateInfo *vmaAllocCreateInfo,
-                        VkImage *image, VmaAllocation *allocation, VmaAllocationInfo *alloc_info, uint32_t *buffer_id)
-    {
-        uint32_t memTypeIdx = 0;
-        if (vmaFindMemoryTypeIndexForImageInfo(m_allocator, imageCreateInfo, vmaAllocCreateInfo, &memTypeIdx) ==
-            VK_SUCCESS)
-        {
-            vmaAllocCreateInfo->memoryTypeBits = 1u << memTypeIdx;
-            CHECK_RESULT(
-                vmaCreateImage(m_allocator, imageCreateInfo, vmaAllocCreateInfo, image, allocation, alloc_info),
-                "failure to allocate image");
-            *buffer_id = m_images.size();
-            m_images.emplace(*buffer_id, std::make_pair(*image, *allocation));
-        }
-        else
-        {
-            printf("Failed to find memory type index\n");
-        }
-    }
+    std::shared_ptr<vkrt_compute_program> construct(
+        const std::vector<uint32_t> &code);
 
-    void destroy_image(VkImage image, VmaAllocation allocation) const
-    {
-        vmaDestroyImage(m_allocator, image, allocation);
-    }
-
-    void allocate_buffer_view(const VkBufferViewCreateInfo *bufferViewCreateInfo, VkBufferView *bufferView,
-                              uint32_t *buffer_id)
-    {
-        *buffer_id = m_buffer_views.size();
-        CHECK_RESULT(vkCreateBufferView(m_dev, bufferViewCreateInfo, nullptr, bufferView),
-                     "failure to allocate buffer view");
-        m_buffer_views.emplace(*buffer_id, *bufferView);
-    }
-
-    void destroy_buffer_view(VkBufferView bufferView) const
-    {
-        vkDestroyBufferView(m_dev, bufferView, nullptr);
-    }
-
-    void allocate_image_view(const VkImageViewCreateInfo *imageViewCreateInfo, VkImageView *imageView,
-                             uint32_t *buffer_id)
-    {
-        *buffer_id = m_image_views.size();
-        CHECK_RESULT(vkCreateImageView(m_dev, imageViewCreateInfo, nullptr, imageView),
-                     "failure to allocate image view");
-        m_image_views.emplace(*buffer_id, *imageView);
-    }
-
-    void destroy_image_view(VkImageView imageView) const
-    {
-        vkDestroyImageView(m_dev, imageView, nullptr);
-    }
-
-    auto get_shader_module(const std::vector<uint32_t> &code, VkShaderModule *shaderModule, uint32_t *shader_id)
-    {
-        *shader_id = m_shader_modules.size();
-        VkShaderModuleCreateInfo moduleCreateInfo = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        moduleCreateInfo.pCode = code.data();
-        moduleCreateInfo.codeSize = code.size() * sizeof(uint32_t);
-        moduleCreateInfo.flags = 0;
-        moduleCreateInfo.pNext = nullptr;
-        CHECK_RESULT(vkCreateShaderModule(m_dev, &moduleCreateInfo, nullptr, shaderModule),
-                     " failed to create shaderModule");
-        m_shader_modules.emplace(*shader_id, *shaderModule);
-    }
-
-    void destroy_shader_module(VkShaderModule shaderModule) const
-    {
-        vkDestroyShaderModule(m_dev, shaderModule, nullptr);
-    }
-
-    void get_pipeline_layout(VkPipelineLayoutCreateInfo *layoutInfo, VkPipelineLayout *layout, uint32_t *layout_id)
-    {
-        *layout_id = m_pipeline_layout.size();
-        vkCreatePipelineLayout(m_dev, layoutInfo, nullptr, layout);
-        m_pipeline_layout.emplace(*layout_id, *layout);
-    }
-
-    void destroy_pipeline_layout(VkPipelineLayout pipelineLayout) const
-    {
-        vkDestroyPipelineLayout(m_dev, pipelineLayout, nullptr);
-    }
-
-    void get_pipeline(VkComputePipelineCreateInfo *StageInfo, VkPipeline *pipeline, uint32_t *pipeline_id)
-    {
-        *pipeline_id = m_pipelines.size();
-        vkCreateComputePipelines(m_dev, m_pipeline_cache, 1, StageInfo, nullptr, pipeline);
-        m_pipelines.emplace(*pipeline_id, *pipeline);
-    }
-
-    void destroy_pipeline(VkPipeline pipeline) const
-    {
-        vkDestroyPipeline(m_dev, pipeline, nullptr);
-    }
+    void update(uint32_t set_id, std::shared_ptr<vkrt_compute_program> program,
+                std::vector<std::shared_ptr<vkrt_buffer>> &buffers) const;
 
     size_t getMaxAllocationSize() const
     {
@@ -278,22 +195,8 @@ class Device
         return queues;
     }
 
-    
-    auto getDescriptorSet(uint32_t set_number, VkDescriptorSetLayoutCreateInfo *create_info,
-                          std::vector<VkWriteDescriptorSet> &writes, VkDescriptorSet &set,
-                          VkDescriptorSetLayout &layout)
-    {
-        layout = m_desc_layout_cache->create_descriptor_layout(m_dev, set_number, create_info);
-        bool success = m_desc_pool_alloc->allocate(m_dev, &set, &layout);
-        if (!success)
-            return false;
-        for (VkWriteDescriptorSet &w : writes)
-            w.dstSet = set;
-        vkUpdateDescriptorSets(m_dev, writes.size(), writes.data(), 0, nullptr);
-        return true;
-    }
 
-    std::shared_future<void> submit(struct ComputePacket &packet)
+    void submit(struct ComputePacket &packet)
     {
         auto qit = m_queue_map.equal_range(VK_QUEUE_COMPUTE_BIT);
         for (auto &qidx = qit.first; qidx != qit.second; ++qidx)
@@ -301,15 +204,25 @@ class Device
             std::shared_ptr<QueueDispatcher> &q = m_queues.at(qidx->second);
             if (!q->isBusy())
             {
-                return q->submit(packet);
+                q->submit(packet);
                 break;
             }
         }
         throw std::runtime_error("No compute queue available");
     }
 
+    void constructEvent(VkEventCreateInfo *info, VkEvent *event) const
+    {
+        vkCreateEvent(m_dev, info, nullptr, event);
+    }
+
+    void destoryEvent(VkEvent event) const
+    {
+        vkDestroyEvent(m_dev, event, nullptr);
+    }
+
     friend class ComputeProgram;
-    friend class StorageBuffer;
+    friend class buffer;
 
   public:
     Device(const Device &other)
@@ -319,10 +232,7 @@ class Device
         m_pDev = other.m_pDev;
         m_allocator = other.m_allocator;
         m_queues = other.m_queues;
-        m_buffers = other.m_buffers;
-        m_images = other.m_images;
-        m_buffer_views = other.m_buffer_views;
-        m_image_views = other.m_image_views;
+        execGraph = other.execGraph;
         m_feats = other.m_feats;
         m_props = other.m_props;
         m_desc_pool_alloc = other.m_desc_pool_alloc;
@@ -336,10 +246,7 @@ class Device
         m_pDev = other.m_pDev;
         m_allocator = other.m_allocator;
         m_queues = other.m_queues;
-        m_buffers = other.m_buffers;
-        m_images = other.m_images;
-        m_buffer_views = other.m_buffer_views;
-        m_image_views = other.m_image_views;
+        execGraph = other.execGraph;
         m_feats = other.m_feats;
         m_props = other.m_props;
         m_desc_pool_alloc = other.m_desc_pool_alloc;
@@ -421,20 +328,39 @@ class Device
 
     void destory()
     {
-        for (auto &id_buf : m_buffers)
-            destroy_buffer(id_buf.second.first, id_buf.second.second);
-        for (auto &id_img : m_images)
-            destroy_image(id_img.second.first, id_img.second.second);
-        for (auto &id_buf_view : m_buffer_views)
-            destroy_buffer_view(id_buf_view.second);
-        for (auto &id_img_view : m_image_views)
-            destroy_image_view(id_img_view.second);
-        for (auto &id_shader_module : m_shader_modules)
-            destroy_shader_module(id_shader_module.second);
-        for (auto &id_pipeline_layout : m_pipeline_layout)
-            destroy_pipeline_layout(id_pipeline_layout.second);
-        for (auto &id_pipeline : m_pipelines)
-            destroy_pipeline(id_pipeline.second);
+        /*
+            buffers
+            compute programs
+        */
+        for (auto i = 0; i < execGraph.size(); ++i)
+        {
+            auto node = execGraph.getNode(i);
+
+            if (node->sType == vkrtType::BUFFER)
+            {
+                auto buffer = std::static_pointer_cast<vkrt_buffer>(node);
+                vkDestroyBuffer(m_dev, buffer->buffer, nullptr);
+                vmaFreeMemory(m_allocator, buffer->allocation);
+            }
+            else if (node->sType == vkrtType::COMPUTE_PROGRAM)
+            {
+                auto program = std::static_pointer_cast<vkrt_compute_program>(node);
+                for (auto i = 0; i < program->n_sets; ++i)
+                {
+                    delete[] program->bindings[i];
+                    delete[] program->writes[i];                    
+                    vkDestroyDescriptorSetLayout(m_dev, program->layouts[i], nullptr);
+                }
+                vkDestroyShaderModule(m_dev, program->module, nullptr);
+                vkDestroyPipelineLayout(m_dev, program->pipeline_layout, nullptr);
+                vkDestroyPipeline(m_dev, program->pipeline, nullptr);
+                delete[] program->writes;
+                delete[] program->bindings;
+                delete[] program->layouts;
+                delete[] program->n_set_bindings;
+                delete program->sets;
+            }
+        }
         for (auto &q : m_queues)
             q->destroy(m_dev);
         m_desc_layout_cache->destory(m_dev);
@@ -452,79 +378,126 @@ class Device
         vmaGetAllocationMemoryProperties(m_allocator, alloc, &flags);
         return flags;
     }
-
-    std::vector<std::string> getSupportedExtensions()
-    {
-        std::vector<VkExtensionProperties> extensions;
-        uint32_t ext_count = 0;
-        vkEnumerateDeviceExtensionProperties(m_pDev, nullptr, &ext_count, nullptr);
-        extensions.resize(ext_count);
-        vkEnumerateDeviceExtensionProperties(m_pDev, nullptr, &ext_count,
-                                             reinterpret_cast<VkExtensionProperties *>(extensions.data()));
-        std::vector<std::string> supported_extensions;
-        for (auto &ext : extensions)
-            supported_extensions.emplace_back(ext.extensionName);
-        return supported_extensions;
-    }
-
-    uint32_t getVendorID() const
-    {
-        return m_props.device_properties_2.properties.vendorID;
-    }
-
-    uint32_t getDeviceType() const
-    {
-        return m_props.device_properties_2.properties.deviceType;
-    }
-
-    std::vector<std::string> getDeviceCapabilities() const
-    {
-        std::vector<std::string> device_capabilities;
-
-        if (m_feats.features2.features.geometryShader)
-            device_capabilities.push_back("geometryShader");
-        if (m_feats.features2.features.tessellationShader)
-            device_capabilities.push_back("tessellationShader");
-        if (m_feats.features2.features.shaderInt16)
-            device_capabilities.push_back("shaderInt16");
-        if (m_feats.features2.features.shaderInt64)
-            device_capabilities.push_back("shaderInt64");
-        if (m_feats.features12.shaderFloat16)
-            device_capabilities.push_back("shaderFloat16");
-        if (m_feats.features12.shaderInt8)
-            device_capabilities.push_back("shaderInt8");
-        return device_capabilities;
-    }
-    
-    std::vector < std::string > getCoopMatrixfeatures()
-    {
-        std::vector<std::string> coop_matrix_capabilities;
-        if (m_feats.coo_matrix_features.cooperativeMatrixRobustBufferAccess)
-            coop_matrix_capabilities.push_back("cooperativeMatrixRobustBufferAccess");
-        if (m_feats.coo_matrix_features.cooperativeMatrix)
-            coop_matrix_capabilities.push_back("cooperativeMatrix");
-        return coop_matrix_capabilities;
-    }
-
-    std::vector<uint32_t> getResourceLimits() const
-    {
-        std::vector<uint32_t> resource_limits;
-        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeSharedMemorySize);
-        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeWorkGroupInvocations);
-        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeWorkGroupSize[0]);
-        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeWorkGroupSize[1]);
-        resource_limits.push_back( m_props.device_properties_2.properties.limits.maxComputeWorkGroupSize[2]);
-        resource_limits.push_back( m_props.subgroup_properties.subgroupSize);
-        resource_limits.push_back( m_props.device_vulkan13_properties.minSubgroupSize);
-        resource_limits.push_back( m_props.device_vulkan13_properties.maxSubgroupSize);        
-        return resource_limits;
-    }
 };
+std::shared_ptr<vkrt_buffer> Device::construct(const VkBufferCreateInfo *bufferCreateInfo,
+                                               VmaAllocationCreateInfo *vmaAllocCreateInfo)
+{
+    std::shared_ptr<vkrt_buffer> buffer;
+    buffer->sType = vkrtType::BUFFER;
+    uint32_t memTypeIdx = 0;
+    VkResult res{};
+
+    if (vmaFindMemoryTypeIndexForBufferInfo(m_allocator, bufferCreateInfo, vmaAllocCreateInfo, &memTypeIdx) ==
+        VK_SUCCESS)
+    {
+        vmaAllocCreateInfo->memoryTypeBits = 1u << memTypeIdx;
+        res = vmaCreateBuffer(m_allocator, bufferCreateInfo, vmaAllocCreateInfo, &buffer->buffer, &buffer->allocation,
+                              &buffer->allocation_info);
+    }
+    if (buffer->buffer != nullptr && res == VK_SUCCESS)
+        execGraph.addNode(buffer);
+
+    return buffer;
+}
+
+std::shared_ptr<vkrt_compute_program> Device::construct(
+        const std::vector<uint32_t> &code)
+{
+
+    VkPipelineShaderStageCreateInfo stageInfo = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+    VkPipelineLayoutCreateInfo layoutInfo = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    VkComputePipelineCreateInfo pipelineInfo = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    VkShaderModuleCreateInfo moduleInfo = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+
+    SpvReflectShaderModule spv_module = {};
+    std::shared_ptr<vkrt_compute_program> program = std::make_shared<vkrt_compute_program>();
+    program->sType = vkrtType::COMPUTE_PROGRAM;
+    SpvReflectResult result = spvReflectCreateShaderModule(code.size() * sizeof(uint32_t), code.data(), &spv_module);
+    result = spvReflectEnumerateDescriptorSets(&spv_module, &program->n_sets, NULL);
+    program->n_set_bindings = new uint32_t[program->n_sets];
+    program->layouts = new VkDescriptorSetLayout[program->n_sets];
+    program->sets = new VkDescriptorSet[program->n_sets];
+    program->writes = new VkWriteDescriptorSet *[program->n_sets];
+    program->bindings = new VkDescriptorSetLayoutBinding *[program->n_sets];
+    std::vector<SpvReflectDescriptorSet *> sets(program->n_sets);
+    result = spvReflectEnumerateDescriptorSets(&spv_module, &program->n_sets, sets.data());
+    for (size_t i = 0; i < sets.size(); ++i)
+    {
+        const SpvReflectDescriptorSet &refl_set = *(sets[i]);
+        program->bindings[i] = new VkDescriptorSetLayoutBinding[refl_set.binding_count];
+        program->writes[i] = new VkWriteDescriptorSet[refl_set.binding_count];
+        for (size_t j = 0; j < refl_set.binding_count; ++j)
+        {
+            const SpvReflectDescriptorBinding &refl_binding = *(refl_set.bindings[j]);
+            program->n_set_bindings[i] = refl_set.binding_count;
+            program->bindings[i][j].binding = refl_binding.binding;
+            program->bindings[i][j].descriptorType = static_cast<VkDescriptorType>(refl_binding.descriptor_type);
+            program->bindings[i][j].stageFlags = static_cast<VkShaderStageFlagBits>(spv_module.shader_stage);
+            program->bindings[i][j].descriptorCount = 1;
+            for (uint32_t k = 0; k < refl_binding.array.dims_count; ++k)
+                program->bindings[i][j].descriptorCount *= refl_binding.array.dims[k];
+            program->writes[i][j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            program->writes[i][j].descriptorCount = program->bindings[i][j].descriptorCount;
+            program->writes[i][j].descriptorType = program->bindings[i][j].descriptorType;
+            program->writes[i][j].dstBinding = program->bindings[i][j].binding;
+
+        }
+
+        VkDescriptorSetLayoutCreateInfo create_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        create_info.bindingCount = static_cast<uint32_t>(refl_set.binding_count);
+        create_info.pBindings = program->bindings[i];
+        program->layouts[i] = m_desc_layout_cache->create_descriptor_layout(m_dev, i, &create_info);
+        bool success = m_desc_pool_alloc->allocate(m_dev, &program->sets[i], &program->layouts[i]);
+        for (size_t j = 0; j < refl_set.binding_count; ++j)
+            program->writes[i][j].dstSet = program->sets[i];
+    }
+   
+    moduleInfo.pCode = code.data();
+    moduleInfo.codeSize = code.size() * sizeof(uint32_t);
+    moduleInfo.flags = 0;
+    moduleInfo.pNext = nullptr;
+    CHECK_RESULT(vkCreateShaderModule(m_dev, &moduleInfo, nullptr, &program->module),
+                 " failed to create shaderModule");
+
+    stageInfo.pNext = nullptr;
+    stageInfo.stage = static_cast<VkShaderStageFlagBits>(spv_module.shader_stage);
+    stageInfo.module = program->module;
+    stageInfo.pName = spv_module.entry_point_name;
+
+    layoutInfo.pNext = nullptr;
+    layoutInfo.setLayoutCount = program->n_sets;
+    layoutInfo.pSetLayouts = program->layouts;
+    layoutInfo.pushConstantRangeCount = 0;
+    layoutInfo.pPushConstantRanges = nullptr;
+    vkCreatePipelineLayout(m_dev, &layoutInfo, nullptr, &program->pipeline_layout);
+
+    pipelineInfo.pNext = nullptr;
+    pipelineInfo.stage = stageInfo;
+    pipelineInfo.layout = program->pipeline_layout;
+    vkCreateComputePipelines(m_dev, m_pipeline_cache, 1, &pipelineInfo, nullptr, &program->pipeline);
+
+    execGraph.addNode(program);
+    return program;
+}
+
+void Device::update(uint32_t set_id, std::shared_ptr<vkrt_compute_program> program,
+            std::vector<std::shared_ptr<vkrt_buffer>> &buffers) const
+{
+    for (uint32_t j = 0; j < program->n_set_bindings[set_id]; ++j)
+    {
+        VkDescriptorBufferInfo desc_buffer_info = {buffers[j]->buffer, 0, buffers[j]->allocation_info.size};
+        program->writes[set_id][j].pBufferInfo = &desc_buffer_info;
+    }
+
+    vkUpdateDescriptorSets(m_dev, program->n_set_bindings[set_id], program->writes[set_id], 0, nullptr);
+}
+
+
 
 } // namespace vkrt
 
 /*
-    auto &q = getSparseQueueFamily();    
+    auto &q = getSparseQueueFamily();
     if (bufferCreateInfo->size >= getSparseAllocationSize())
     {
         return;
@@ -584,7 +557,7 @@ class Device
     {
         printf("Failed to find memory type index\n");
     }
-        
+
 
 
 

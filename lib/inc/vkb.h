@@ -1,48 +1,29 @@
 #include <vk_mem_alloc.h>
 
+enum class StorageTYPE
+{
+    BUFFER,
+    IMAGE,
+    BUFFER_VIEW,
+    IMAGE_VIEW
+};
 
-namespace vkrt {
+namespace vkrt
+{
 
-class StorageBuffer
+class buffer
 {
   protected:
-    union storage {
-        VkBuffer m_buffer;
-        VkImage m_image;
-        VkBufferView m_buffer_view;
-        VkImageView m_image_view;
-    } m_storage;
-
-    VmaAllocation m_allocation = nullptr;
-    VmaAllocationInfo m_allocation_info = {};
-    VmaAllocationCreateInfo m_allocation_create_info;
-
-    union createinfo {
-        VkBufferCreateInfo m_buffer_create_info;
-        VkImageCreateInfo m_image_create_info;
-        VkBufferViewCreateInfo m_buffer_view_create_info;
-        VkImageViewCreateInfo m_image_view_create_info;
-    } m_createinfo;
-
-    uint32_t m_id = UINT32_MAX;
+    StorageTYPE m_type{StorageTYPE::BUFFER};
+    std::shared_ptr<vkrt_buffer> m_storage;
     Device *m_dev = nullptr;
 
     int m_flags = 0;
     bool m_is_mapped = false;
     void *m_data = nullptr;
-
-    union DescriptorInfo {
-        VkDescriptorBufferInfo desc_buffer_info;
-        VkDescriptorImageInfo desc_image_info;
-    } m_desc_info;
-
-    enum class BUFFERTYPE
-    {
-        BUFFER,
-        IMAGE,
-        BUFFER_VIEW,
-        IMAGE_VIEW
-    } m_type;
+    VkDescriptorBufferInfo desc_buffer_info;
+    VkBufferCreateInfo m_create_info;
+    VmaAllocationCreateInfo m_allocation_create_info;
 
     void setFlags(int flags)
     {
@@ -64,161 +45,123 @@ class StorageBuffer
 
     void map()
     {
-        if (m_is_mapped && m_allocation_info.pMappedData != nullptr)
+        if (m_is_mapped && m_storage->allocation_info.pMappedData != nullptr)
         {
-            m_data = m_allocation_info.pMappedData;
+            m_data = m_storage->allocation_info.pMappedData;
         }
         else if (m_is_mapped)
         {
-            m_dev->map_buffer(m_allocation, &m_data);
+            m_dev->map_buffer(m_storage->allocation, &m_data);
         }
     }
 
     void lazy_load()
     {
-        if (m_type == BUFFERTYPE::BUFFER && m_storage.m_buffer == nullptr)
-        {
-            m_dev->allocate_buffer(&m_createinfo.m_buffer_create_info, &m_allocation_create_info, &m_storage.m_buffer,
-                                   &m_allocation, &m_allocation_info, &m_id);
-            if (isLive())
-                map();
-        }
-        if (m_type == BUFFERTYPE::IMAGE && m_storage.m_image == nullptr)
-        {
-            m_dev->allocate_image(&m_createinfo.m_image_create_info, &m_allocation_create_info, &m_storage.m_image,
-                                  &m_allocation, &m_allocation_info, &m_id);
-            if (isLive())
-                map();
-        }
 
-        if (m_type == BUFFERTYPE::BUFFER_VIEW && m_storage.m_buffer_view == nullptr)
-        {
-            m_dev->allocate_buffer_view(&m_createinfo.m_buffer_view_create_info, &m_storage.m_buffer_view, &m_id);
-        }
-        if (m_type == BUFFERTYPE::IMAGE_VIEW && m_storage.m_image_view == nullptr)
-        {
-            m_dev->allocate_image_view(&m_createinfo.m_image_view_create_info, &m_storage.m_image_view, &m_id);
-        }
+        m_storage = m_dev->construct(&m_create_info, &m_allocation_create_info);
+        if (isLive())
+            map();     
+       
     }
 
   public:
-    StorageBuffer(Device &dev, size_t size, VkBufferUsageFlags flags, bool is_mapped = false)
-        : m_flags(static_cast<int>(flags)), m_is_mapped(is_mapped), m_type(BUFFERTYPE::BUFFER)
+    buffer(Device &dev, size_t size, VkBufferUsageFlags flags, bool is_mapped = false)
+        : m_flags(static_cast<int>(flags)), m_is_mapped(is_mapped), m_type(StorageTYPE::BUFFER)
     {
-        m_storage.m_buffer = nullptr;
+        m_storage = nullptr;
         m_dev = &dev;
-        m_createinfo.m_buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        m_createinfo.m_buffer_create_info.pNext = nullptr;
-        m_createinfo.m_buffer_create_info.size = size;
-        m_createinfo.m_buffer_create_info.flags = 0;
-        m_createinfo.m_buffer_create_info.usage = flags;
-        m_createinfo.m_buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        m_createinfo.m_buffer_create_info.pQueueFamilyIndices = 0;
-        m_createinfo.m_buffer_create_info.queueFamilyIndexCount = 0;
+        m_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        m_create_info.pNext = nullptr;
+        m_create_info.size = size;
+        m_create_info.flags = 0;
+        m_create_info.usage = flags;
+        m_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        m_create_info.pQueueFamilyIndices = 0;
+        m_create_info.queueFamilyIndexCount = 0;
         m_allocation_create_info.flags = VMA_ALLOCATION_CREATE_STRATEGY_BEST_FIT_BIT;
         m_allocation_create_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
-
-        m_type = BUFFERTYPE::BUFFER;
         setFlags(static_cast<int>(flags));
-        // if (is_mapped)
-        lazy_load();
     }
 
-    StorageBuffer &operator=(const StorageBuffer &other)
+    buffer &operator=(const buffer &other)
     {
         m_dev = other.m_dev;
-        m_storage = other.m_storage;
-        m_allocation = other.m_allocation;
-        m_allocation_info = other.m_allocation_info;
-        m_createinfo = other.m_createinfo;
+        m_storage = other.m_storage;        
+        m_create_info = other.m_create_info;
         m_allocation_create_info = other.m_allocation_create_info;
-        m_id = other.m_id;
         m_flags = other.m_flags;
-        m_desc_info = other.m_desc_info;
+        desc_buffer_info = other.desc_buffer_info;
         m_type = other.m_type;
         return *this;
     }
 
-    StorageBuffer(const StorageBuffer &other)
+    buffer(const buffer &other)
     {
         m_dev = other.m_dev;
         m_storage = other.m_storage;
-        m_allocation = other.m_allocation;
-        m_allocation_info = other.m_allocation_info;
-        m_createinfo = other.m_createinfo;
+        m_create_info = other.m_create_info;
         m_allocation_create_info = other.m_allocation_create_info;
-        m_id = other.m_id;
         m_flags = other.m_flags;
-        m_desc_info = other.m_desc_info;
+        desc_buffer_info = other.desc_buffer_info;
         m_type = other.m_type;
     }
 
-    auto getMemoryProperties()
-    {
-        VkMemoryPropertyFlagBits memFlags{};
-        return m_dev->getMemoryProperty(m_allocation);
-    }
-
     auto getSize() const {
-        return m_createinfo.m_buffer_create_info.size;
+        return m_create_info.size;
     }
 
-    void *data()
+    void upload(void *src, size_t size, size_t offset = 0)
     {
-        return m_data;
+
+        if (isLive() && m_dev->getMemoryProperty(m_storage->allocation) & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+        {
+            m_dev->copyMemoryToBuffer(m_storage->allocation, src, size, offset);
+        }
+        else if (isLive())
+        {
+            buffer staging(*m_dev, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+            staging.upload(src, size, offset); 
+            staging.lazy_load();
+            //1 VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT;
+            
+            /*VkBufferCopy2 copy = {VK_STRUCTURE_TYPE_BUFFER_COPY_2};
+            copy.pNext = nullptr;
+            copy.srcOffset = staging.m_storage->allocation_info.offset;
+            if (!isLive())
+                lazy_load();
+            copy.dstOffset = m_storage->allocation_info.offset;*/
+            //2 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_BIT
+        }
     }
 
-    //auto GetAccessFlags() const
-    //{
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_TRANSFER_SRC_BIT)
-    //        return VK_ACCESS_TRANSFER_READ_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT)
-    //        return VK_ACCESS_TRANSFER_WRITE_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT)
-    //        return VK_ACCESS_SHADER_READ_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_STORAGE_TEXEL_BUFFER_BIT)
-    //        return VK_ACCESS_SHADER_READ_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
-    //        return VK_ACCESS_UNIFORM_READ_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
-    //        return VK_ACCESS_SHADER_READ_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_INDEX_BUFFER_BIT)
-    //        return VK_ACCESS_INDEX_READ_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
-    //        return VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT)
-    //        return VK_ACCESS_INDIRECT_COMMAND_READ_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
-    //        return VK_ACCESS_SHADER_READ_BIT;
-    //    if (m_createinfo.m_buffer_create_info.usage & VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR)
-    //        return VK_ACCESS_SHADER_READ_BIT;
-    //    return VK_ACCESS_HOST_WRITE_BIT;
-    //}
+    void download(void *dst, size_t size, size_t offset=0)
+    {
+        if (isLive() && m_dev->getMemoryProperty(m_storage->allocation) & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
+        {
+            m_dev->copyBufferToMemory(m_storage->allocation, dst, size, offset);
+        }
+        else
+        {
+            buffer staging(*m_dev, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+            //staging.download(dst, size, offset);
+            //2 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT;       
+            
+          /*  VkBufferCopy2 copy = {VK_STRUCTURE_TYPE_BUFFER_COPY_2};
+            copy.pNext = nullptr;
+            copy.dstOffset = m_storage->allocation_info.offset;
+            if (!isLive())
+                lazy_load();
+            copy.srcOffset = staging.m_storage->allocation_info.offset;*/
+            //1 VK_PIPELINE_STAGE_COMPUTE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT
+
+        }
+    }
 
     bool isLive(void) const
     {
-        return m_id != UINT32_MAX;
-    }
+        return m_storage.use_count()  && m_storage->id != UINT64_MAX;
+    };
 
-    void setWriteDescriptorSet(VkWriteDescriptorSet &write)
-    {
-        lazy_load();
-        if (m_storage.m_buffer != nullptr && m_type == BUFFERTYPE::BUFFER)
-        {
-            m_desc_info.desc_buffer_info.buffer = m_storage.m_buffer;
-            m_desc_info.desc_buffer_info.offset = 0;
-            m_desc_info.desc_buffer_info.range = m_allocation_info.size;
-            write.pBufferInfo = &(m_desc_info.desc_buffer_info);
-        }
-        else if (m_storage.m_image != nullptr && (m_type == BUFFERTYPE::IMAGE || m_type == BUFFERTYPE::IMAGE_VIEW))
-        {
-            m_desc_info.desc_image_info.imageLayout = m_createinfo.m_image_create_info.initialLayout;
-            if (m_type == BUFFERTYPE::IMAGE_VIEW)
-                m_desc_info.desc_image_info.imageView = m_storage.m_image_view;
-            write.pImageInfo = &(m_desc_info.desc_image_info);
-        }
-    }
 };
 
-
-}
+} // namespace vkrt

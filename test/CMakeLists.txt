@@ -5,7 +5,7 @@ add_executable(rt_test
 	rt.cpp
 )
 add_executable(shader_test 
-	ssprgm.cpp
+	"square.cpp"
 )
 
 target_link_libraries(rt_test PRIVATE rt)

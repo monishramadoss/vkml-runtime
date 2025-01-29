@@ -2,6 +2,10 @@
 
 #define VMA_STATIC_VULKAN_FUNCTIONS 1
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 0
+#define VMA_USE_STL_CONTAINERS 0
+#define VMA_USE_STL_VECTOR 0
+#define VMA_USE_STL_UNORDERED_MAP 0
+#define VMA_USE_STL_LIST 0
 #define VMA_IMPLEMENTATION
 
 #define VK_NO_PROTOTYPES
@@ -19,7 +23,7 @@
 #include <vector>
 
 #include <vulkan/vulkan.h>
-#include "volk.h"
+#include <volk.h>
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
                                                     VkDebugUtilsMessageTypeFlagsEXT messageType,
@@ -54,6 +58,7 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT
 #include "vkd.h"
 #include "vkb.h"
 #include "vkc.h"
+#include "vke.h"
 
 namespace vkrt
 {
@@ -161,12 +166,12 @@ class Instance
     {
         return m_devices.at(i);
     }
-
+    
     size_t get_device_count() const
     {
         return m_devices.size();
     }
-
+    
     ~Instance()
     {
         for (auto &dev : m_devices)
@@ -177,4 +182,4 @@ class Instance
     }
 };
 
-}; // namespace vkrt
+} // namespace vkrt
