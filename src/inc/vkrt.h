@@ -60,7 +60,7 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT
 #include "vkc.h"
 #include "vke.h"
 
-namespace vkrt
+namespace runtime
 {
 
 class Instance

@@ -1,6 +1,6 @@
 #include "inc/vkrt.h"
 
-namespace vkrt
+namespace runtime
 {
 
 } // namespace vkrt

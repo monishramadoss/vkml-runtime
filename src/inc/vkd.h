@@ -5,7 +5,7 @@
 #include <thread>
 #include <vk_mem_alloc.h>
 
-namespace vkrt
+namespace runtime
 {
 
 class Device
@@ -345,7 +345,7 @@ class Device
             else if (node->sType == vkrtType::COMPUTE_PROGRAM)
             {
                 auto program = std::static_pointer_cast<vkrt_compute_program>(node);
-                for (auto i = 0; i < program->n_sets; ++i)
+                for (uint32_t i = 0; i < program->n_sets; ++i)
                 {
                     delete[] program->bindings[i];
                     delete[] program->writes[i];                    
@@ -378,6 +378,97 @@ class Device
         vmaGetAllocationMemoryProperties(m_allocator, alloc, &flags);
         return flags;
     }
+
+
+    std::vector<std::string> getDeviceCapabilities() const
+    {
+        std::vector<std::string> capabilities;
+        if (m_feats.features12.shaderFloat16)
+            capabilities.push_back("Float16");
+        if (m_feats.features2.features.shaderFloat64)
+            capabilities.push_back("Float64");
+        if (m_feats.features2.features.shaderInt64)
+            capabilities.push_back("Int64");
+        if (m_feats.features2.features.shaderInt16)
+            capabilities.push_back("Int16");
+        if (m_feats.features12.shaderInt8)
+            capabilities.push_back("Int8");
+
+        return capabilities;
+    }
+
+    std::vector<std::string> getSupportedExtensions() const
+    {
+        std::vector<VkExtensionProperties> extensions;   
+        uint32_t extension_count;
+        vkEnumerateDeviceExtensionProperties(m_pDev, nullptr, &extension_count,nullptr);
+        extensions.resize(extension_count);
+        vkEnumerateDeviceExtensionProperties(m_pDev, nullptr, &extension_count, extensions.data());
+        std::vector<std::string> exts;
+        for (auto &ext : extensions)
+        {
+            std::string e = ext.extensionName;
+            e[0] = 'P';
+            e[1] = 'V';
+            e = 'S' + e;
+            exts.push_back(e);
+        }
+        return exts;
+    }
+
+    uint32_t getDeviceType() const
+    {
+        switch (m_props.device_properties_2.properties.deviceType)
+        {
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            return 2;
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            return 1;
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            return 0;
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+        case VK_PHYSICAL_DEVICE_TYPE_OTHER:
+            return 3;
+        }
+        return 4294967295;
+    }
+
+    uint32_t getVendorID() const
+    {
+        switch (m_props.device_properties_2.properties.vendorID)
+        {
+        case 4130:
+            return 0;
+        case 4203:
+            return 1;
+        case 5045:
+            return 2;
+        case 4454:
+            return 3;
+        case 32902:
+            return 5;
+        case 4318:
+            return 6;
+        case 6091:
+            return 7;
+        };
+        return 4294967295;
+    }
+
+    std::vector<uint32_t> getResourceLimits() const
+    {
+        std::vector<uint32_t> resource_limit;
+        resource_limit.emplace_back(m_props.device_properties_2.properties.limits.maxComputeSharedMemorySize);
+        resource_limit.emplace_back(m_props.device_properties_2.properties.limits.maxComputeWorkGroupInvocations);
+        resource_limit.emplace_back(m_props.device_properties_2.properties.limits.maxComputeWorkGroupSize[0]);
+        resource_limit.emplace_back(m_props.device_properties_2.properties.limits.maxComputeWorkGroupSize[1]);
+        resource_limit.emplace_back(m_props.device_properties_2.properties.limits.maxComputeWorkGroupSize[2]);
+        resource_limit.emplace_back(m_props.subgroup_properties.subgroupSize);
+        resource_limit.emplace_back(m_props.device_vulkan13_properties.minSubgroupSize);
+        resource_limit.emplace_back(m_props.device_vulkan13_properties.maxSubgroupSize);
+        return resource_limit;
+    }
+
 };
 std::shared_ptr<vkrt_buffer> Device::construct(const VkBufferCreateInfo *bufferCreateInfo,
                                                VmaAllocationCreateInfo *vmaAllocCreateInfo)
@@ -497,66 +588,68 @@ void Device::update(uint32_t set_id, std::shared_ptr<vkrt_compute_program> progr
 } // namespace vkrt
 
 /*
-    auto &q = getSparseQueueFamily();
-    if (bufferCreateInfo->size >= getSparseAllocationSize())
-    {
-        return;
-    }
 
-    if (m_feats.features2.features.sparseBinding)
-    {
-        bufferCreateInfo->sharingMode = VK_SHARING_MODE_CONCURRENT;
-        bufferCreateInfo->flags = VK_BUFFER_CREATE_SPARSE_BINDING_BIT;
-        bufferCreateInfo->pQueueFamilyIndices = q.data();
-        bufferCreateInfo->queueFamilyIndexCount = q.size();
-    }
-    if (m_feats.features2.features.sparseResidencyAliased)
-    {
-        bufferCreateInfo->flags |= VK_BUFFER_CREATE_SPARSE_ALIASED_BIT;
-        vmaAllocCreateInfo->flags |= VMA_ALLOCATION_CREATE_CAN_ALIAS_BIT;
-    }
-    if (m_feats.features2.features.sparseResidencyBuffer)
-    {
-        bufferCreateInfo->flags |= VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT;
-    }
 
-    res = vkCreateBuffer(m_dev, bufferCreateInfo, nullptr, buffer);
-    CHECK_RESULT(res, "failed to create buffer");
+auto &q = getSparseQueueFamily();
+if (bufferCreateInfo->size >= getSparseAllocationSize())
+{
+    return;
+}
 
-    VkMemoryRequirements mem_reqs;
-    vkGetBufferMemoryRequirements(m_dev, *buffer, &mem_reqs);
+if (m_feats.features2.features.sparseBinding)
+{
+    bufferCreateInfo->sharingMode = VK_SHARING_MODE_CONCURRENT;
+    bufferCreateInfo->flags = VK_BUFFER_CREATE_SPARSE_BINDING_BIT;
+    bufferCreateInfo->pQueueFamilyIndices = q.data();
+    bufferCreateInfo->queueFamilyIndexCount = q.size();
+}
+if (m_feats.features2.features.sparseResidencyAliased)
+{
+    bufferCreateInfo->flags |= VK_BUFFER_CREATE_SPARSE_ALIASED_BIT;
+    vmaAllocCreateInfo->flags |= VMA_ALLOCATION_CREATE_CAN_ALIAS_BIT;
+}
+if (m_feats.features2.features.sparseResidencyBuffer)
+{
+    bufferCreateInfo->flags |= VK_BUFFER_CREATE_SPARSE_RESIDENCY_BIT;
+}
 
-    vmaAllocCreateInfo->requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
-    vmaAllocCreateInfo->preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
-    vmaAllocCreateInfo->usage = VMA_MEMORY_USAGE_UNKNOWN;
-    VkSparseMemoryBind binds[MAX_CHUNKS] = {};
-    if (vmaFindMemoryTypeIndexForBufferInfo(m_allocator, bufferCreateInfo, vmaAllocCreateInfo, &memTypeIdx) ==
-        VK_SUCCESS)
+res = vkCreateBuffer(m_dev, bufferCreateInfo, nullptr, buffer);
+CHECK_RESULT(res, "failed to create buffer");
+
+VkMemoryRequirements mem_reqs;
+vkGetBufferMemoryRequirements(m_dev, *buffer, &mem_reqs);
+
+vmaAllocCreateInfo->requiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+vmaAllocCreateInfo->preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+vmaAllocCreateInfo->usage = VMA_MEMORY_USAGE_UNKNOWN;
+VkSparseMemoryBind binds[MAX_CHUNKS] = {};
+if (vmaFindMemoryTypeIndexForBufferInfo(m_allocator, bufferCreateInfo, vmaAllocCreateInfo, &memTypeIdx) ==
+    VK_SUCCESS)
+{
+    auto total_size = bufferCreateInfo->size;
+    size_t num_blocks = std::ceil<size_t>(bufferCreateInfo->size / getMaxAllocationSize());
+    vmaAllocCreateInfo->memoryTypeBits = 1u << memTypeIdx;
+
+    mem_reqs.size = getMaxAllocationSize();
+    vmaAllocateMemoryPages(m_allocator, &mem_reqs, vmaAllocCreateInfo, num_blocks, allocation.data(),
+                            allocInfo.data());
+    size_t bindCount = 0;
+    size_t offset = 0;
+    for (auto bindCount = 0; bindCount < allocInfo.size(); ++bindCount)
     {
-        auto total_size = bufferCreateInfo->size;
-        size_t num_blocks = std::ceil<size_t>(bufferCreateInfo->size / getMaxAllocationSize());
-        vmaAllocCreateInfo->memoryTypeBits = 1u << memTypeIdx;
-
-        mem_reqs.size = getMaxAllocationSize();
-        vmaAllocateMemoryPages(m_allocator, &mem_reqs, vmaAllocCreateInfo, num_blocks, allocation.data(),
-                                allocInfo.data());
-        size_t bindCount = 0;
-        size_t offset = 0;
-        for (auto bindCount = 0; bindCount < allocInfo.size(); ++bindCount)
-        {
-            VkSparseMemoryBind *bind = &binds[bindCount];
-            bind->memory = allocInfo[bindCount].deviceMemory;
-            bind->memoryOffset = offset;
-            bind->resourceOffset = allocInfo[bindCount].offset;
-            bind->size = std::min<uint64_t>(allocInfo[bindCount].size, total_size);
-            total_size -= bind->size;
-            offset += bind->size;
-        }
+        VkSparseMemoryBind *bind = &binds[bindCount];
+        bind->memory = allocInfo[bindCount].deviceMemory;
+        bind->memoryOffset = offset;
+        bind->resourceOffset = allocInfo[bindCount].offset;
+        bind->size = std::min<uint64_t>(allocInfo[bindCount].size, total_size);
+        total_size -= bind->size;
+        offset += bind->size;
     }
-    else
-    {
-        printf("Failed to find memory type index\n");
-    }
+}
+else
+{
+    printf("Failed to find memory type index\n");
+}
 
 
 

@@ -8,7 +8,7 @@ enum class StorageTYPE
     IMAGE_VIEW
 };
 
-namespace vkrt
+namespace runtime
 {
 
 class buffer

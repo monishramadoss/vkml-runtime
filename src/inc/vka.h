@@ -22,11 +22,11 @@ constexpr int MAX_QUE_COUNT = 31;
 // TODO make submission thread, and command buffer generation thread;
 // TODO make a descriptor pool per thread;
 
-namespace vkrt
+namespace runtime
 {
 unsigned int getFirstSetBitPos(int n)
 {
-    return log2(n & -n) + 1;
+    return static_cast<unsigned int>(log2(n & -n)) + 1;
 }
 
 struct ComputePacket
@@ -177,7 +177,7 @@ static void primaryBufferRecord(VkCommandBuffer &primaryBuffer, const std::vecto
     primaryBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     primaryBeginInfo.pNext = nullptr;
     vkBeginCommandBuffer(primaryBuffer, &primaryBeginInfo);
-    vkCmdExecuteCommands(primaryBuffer, cmdBuffers.size(), cmdBuffers.data());
+    vkCmdExecuteCommands(primaryBuffer, static_cast<unsigned int>(cmdBuffers.size()), cmdBuffers.data());
     vkEndCommandBuffer(primaryBuffer);
 }
 
@@ -186,7 +186,7 @@ static void submitQueue(VkQueue &queue, const std::vector<VkCommandBuffer> &prim
     VkSubmitInfo submitInfo = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submitInfo.waitSemaphoreCount = 0;
     submitInfo.pWaitSemaphores = nullptr;
-    submitInfo.commandBufferCount = primaryBuffer.size();
+    submitInfo.commandBufferCount = static_cast<unsigned int>(primaryBuffer.size());
     submitInfo.pCommandBuffers = primaryBuffer.data();
     submitInfo.signalSemaphoreCount = 0;
     submitInfo.pSignalSemaphores = nullptr;
@@ -526,9 +526,9 @@ class DescriptorLayoutCache
         layoutinfo.set_number = set_number;
         layoutinfo.bindings.reserve(info->bindingCount);
         bool isSorted = true;
-        int lastBinding = -1;
+        uint32_t lastBinding = 0;
 
-        for (int i = 0; i < info->bindingCount; i++)
+        for (uint32_t i = 0; i < info->bindingCount; i++)
         {
             layoutinfo.bindings.push_back(info->pBindings[i]);
             if (info->pBindings[i].binding > lastBinding)

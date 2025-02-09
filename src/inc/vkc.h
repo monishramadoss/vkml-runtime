@@ -1,7 +1,7 @@
 #pragma once
 #include <vector>
 
-namespace vkrt {
+namespace runtime {
 
 
 class ComputeProgram
@@ -44,13 +44,13 @@ inline void ComputeProgram::record(uint32_t x, uint32_t y, uint32_t z)
     packet.n_sets = m_program->n_sets;
     m_dev->submit(packet);
 }
-
-template<typename T...>
-void ComputerProgram::operator()(size_t i, T &...args)
-{
-   m_dev->update(i, m_program, );
-    
-
-}
+//
+//template<typename T...>
+//void ComputerProgram::operator()(size_t i, T &...args)
+//{
+//   m_dev->update(i, m_program, );
+//    
+//
+//}
 
 } // namespace vkrt

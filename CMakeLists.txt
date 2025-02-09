@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(vkrt, VERSION 0.0.1 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -32,13 +32,8 @@ set(SPIRV_REFLECT_EXECUTABLE OFF)
 set(SPIRV_REFLECT_STATIC_LIB ON)
 
 add_subdirectory(ext/SPIRV-Reflect)
-include_directories(ext/SPIRV-Reflect)
-
 add_subdirectory(ext/volk)
-include_directories(ext/volk)
-
 add_subdirectory(ext/VulkanMemoryAllocator)
-include_directories(ext/VulkanMemoryAllocator/include)
 
 set(        
     EXT_HEADERS 
@@ -48,7 +43,7 @@ set(
     ${Vulkan_INCLUDE_DIRS}
 )
 
-add_subdirectory(lib)
+add_subdirectory(src)
 
 set_property(GLOBAL PROPERTY VKRT_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/lib/inc ${EXT_HEADERS})
 
