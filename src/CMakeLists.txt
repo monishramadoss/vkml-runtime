@@ -5,7 +5,7 @@ if (WIN32)
 endif()
 
 include_directories(${EXT_HEADERS})
-add_library( vkml-rt STATIC "runtime.cpp"  inc/vkrt.h  inc/vka.h inc/vkb.h inc/vkc.h inc/vkd.h inc/vke.h inc/vkt.h)
+add_library( vkml-rt STATIC "runtime.cpp"  "inc/runtime.h"  inc/vka.h inc/vkb.h inc/vkc.h inc/vkd.h inc/vke.h inc/vkt.h)
 target_include_directories(vkml-rt PUBLIC ${EXT_HEADERS})
 # target_include_directories(vkml-rt PRIVATE ext/VulkanMemoryAllocator/include)
 target_link_libraries(vkml-rt PUBLIC volk)
