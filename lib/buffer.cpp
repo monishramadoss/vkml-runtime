@@ -30,8 +30,12 @@ Buffer Buffer::createUniformBuffer(VkDevice device, VkPhysicalDevice physicalDev
 }
 
 Buffer::~Buffer() {
-    if (m_buffer != VK_NULL_HANDLE) {
-        // Cleanup logic
+    // First, call cleanup to ensure all mapped data is released
+    cleanup();
+    
+    // Then clean up the actual buffer and allocation
+    if (m_buffer != VK_NULL_HANDLE && m_allocation != VK_NULL_HANDLE) {
+        m_allocator->free(m_buffer, m_allocation);
     }
 }
 
@@ -100,14 +104,20 @@ void Buffer::initialize(VkMemoryPropertyFlags properties) {
 }
 
 void Buffer::cleanup() {
-    if (this->m_mapped) {
+    // Ensure we always try to unmap, regardless of state
+    if (m_mapped) {
         m_allocator->getMemoryManager()->unmapMemory(m_allocation);
+        // Release any remaining mapped data
+        m_mappedData = nullptr;
+        m_mapped = false; 
     }
 }
 
 void Buffer::unmap() {
     if (m_mapped) {
         m_allocator->unmap(m_allocation);
+        // Release the allocated memory back to the pool
+        m_mappedData = nullptr; 
         m_mapped = false;
         m_offset = 0;
     }
