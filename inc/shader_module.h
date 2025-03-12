@@ -1,19 +1,16 @@
-#pragma once
+#ifndef SHADER_MODULE_H
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <string>
 #include <unordered_map>
 #include <memory>
-#include "../error_handling.h"
+#include "error_handling.h"
 
 namespace runtime {
-
-class Device;
-
 class ShaderModule {
 public:
     static std::shared_ptr<ShaderModule> create(
-        Device& device,
+        VkDevice device,
         const std::vector<uint32_t>& spirvCode);
 
     ~ShaderModule();
@@ -36,16 +33,18 @@ public:
     const std::vector<ResourceBinding>& getResourceBindings() const { return m_resourceBindings; }
 
 private:
-    ShaderModule(Device& device, const std::vector<uint32_t>& spirvCode);
+    ShaderModule(VkDevice device, const std::vector<uint32_t>& spirvCode);
     
     void initialize();
     void parseReflectionData();
     void cleanup();
 
-    Device& m_device;
+    VkDevice m_device;
     std::vector<uint32_t> m_spirvCode;
     VkShaderModule m_module{VK_NULL_HANDLE};
     std::vector<ResourceBinding> m_resourceBindings;
 };
 
 } // namespace runtime
+
+#endif // SHADER_MODULE_H

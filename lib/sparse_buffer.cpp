@@ -21,65 +21,68 @@ SparseBuffer::SparseBuffer(std::shared_ptr<BufferAllocator> allocator,
                            VkDeviceSize size,
                            VkBufferUsageFlags usage,
                            const std::vector<uint32_t>& sparseQueueFamilies)
-    : Buffer(allocator, size, usage, false),
+    : Buffer(allocator, size, usage, false),  // Base constructor
       m_sparseQueueFamilies(sparseQueueFamilies)
 {
-    initializeSparse();
+    
 }
 
 SparseBuffer::~SparseBuffer()
 {
+    // No need to explicitly unbind sparse memory - will be handled by parent class cleanup
+}
+
+void SparseBuffer::initialize()
+{
+  
+}
+
+void SparseBuffer::bindMemory(const std::vector<MemoryBinding>& bindings, VkQueue sparseQueue, VkFence fence)
+{
     if (m_sparseBinding) {
-        vkQueueBindSparse(m_allocator->getMemoryManager()->getQueue(), 0, nullptr, VK_NULL_HANDLE, VK_NULL_HANDLE);
-    }
-}
-
-void SparseBuffer::initializeSparse()
-{
-    VkBufferCreateInfo bufferInfo = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    bufferInfo.size = m_size;
-    bufferInfo.usage = m_usage;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo = {};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    m_allocator->allocateBuffer(bufferInfo, allocInfo, m_buffer, m_allocation, m_allocationInfo);
-
-    m_sparseBinding = true;
-}
-
-void SparseBuffer::bindMemory(const std::vector<MemoryBinding>& bindings)
-{
-    if (!m_sparseBinding) {
-        throw std::runtime_error("Buffer is not sparse bound");
+        throw std::runtime_error("Memory already bound to sparse buffer");
     }
 
+    if (bindings.empty()) {
+        throw std::invalid_argument("No memory bindings provided");
+    }
+
+    // Create sparse memory binding
     std::vector<VkSparseMemoryBind> memoryBinds;
     for (const auto& binding : bindings) {
-        VkSparseMemoryBind memoryBind = {};
-        memoryBind.resourceOffset = binding.resourceOffset;
-        memoryBind.size = binding.size;
+        VkSparseMemoryBind memoryBind {};
         memoryBind.memory = binding.memory;
         memoryBind.memoryOffset = binding.memoryOffset;
+        memoryBind.resourceOffset = binding.resourceOffset;
+        memoryBind.size = binding.size;
+        memoryBind.flags = binding.flags;
         memoryBinds.push_back(memoryBind);
     }
 
-    VkSparseBufferMemoryBindInfo bufferBindInfo = {};
+    VkSparseBufferMemoryBindInfo bufferBindInfo {};
     bufferBindInfo.buffer = m_buffer;
     bufferBindInfo.bindCount = static_cast<uint32_t>(memoryBinds.size());
     bufferBindInfo.pBinds = memoryBinds.data();
 
-    VkBindSparseInfo bindSparseInfo = {VK_STRUCTURE_TYPE_BIND_SPARSE_INFO};
+    VkBindSparseInfo bindSparseInfo {};
+    bindSparseInfo.sType = VK_STRUCTURE_TYPE_BIND_SPARSE_INFO;
     bindSparseInfo.bufferBindCount = 1;
     bindSparseInfo.pBufferBinds = &bufferBindInfo;
 
-    VkFence fence = VK_NULL_HANDLE;
-    VkResult result = vkQueueBindSparse(m_allocator->getMemoryManager()->getQueue(), 1, &bindSparseInfo, fence);
-    if (result != VK_SUCCESS) {
-        throw std::runtime_error("Failed to bind sparse memory");
-    }
-}
+    VkFence fences[] = {fence};
+    bindSparseInfo.signalSemaphoreCount = 0;
+    bindSparseInfo.waitSemaphoreCount = 0;
+    bindSparseInfo.pSignalSemaphores = nullptr;
+    bindSparseInfo.pWaitSemaphores = nullptr;
+    bindSparseInfo.pFence = fences;
 
+    VkResult result = vkQueueBindSparse(sparseQueue, 1, &bindSparseInfo, VK_NULL_HANDLE);
+    if (result != VK_SUCCESS) {
+        throw std::runtime_error("Failed to bind sparse memory: " + std::to_string(result));
+    }
+
+    m_sparseBinding = true;
+    m_memoryBindings = memoryBinds;
+}
 } // namespace runtime
 

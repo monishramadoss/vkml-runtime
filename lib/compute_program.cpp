@@ -1,76 +1,32 @@
-
 #include "compute_program.h"
-
+#include "device.h"
+#include "buffer.h"
+#include "descriptor_manager.h"
+#include "error_handling.h"
+#include "shader_module.h"
 #include <vulkan/vulkan.h>
 #include <memory>
-
+#include <stdexcept>
+#include <unordered_map>
 
 namespace runtime {
 
-static std::shared_ptr<ComputeProgram> ComputeProgram::create(
-    Device& device,
-    const ProgramCreateInfo& createInfo) {
-    return std::make_shared<ComputeProgram>(device, createInfo);
-}
+static std::shared_ptr<ComputeProgram> create(
+        VkDevice device,
+        const std::shared_ptr<DescriptorManager>& descriptorManager) {
+            return std::shared_ptr<ComputeProgram>(new ComputeProgram(device, descriptorManager));
+    }
 
-ComputeProgram::~ComputeProgram() {
-    cleanup();
-}
-
-void ComputeProgram::bindStorageBuffer(uint32_t set, uint32_t binding, std::shared_ptr<Buffer> buffer) {
-    // Implement buffer binding
+    
+ComputeProgram::ComputeProgram(
+    VkDevice device,
+    const std::shared_ptr<DescriptorManager>& descriptorManager)
+    : m_device(device)
+    , m_descriptorManager(descriptorManager) {
     
 }
-
-void ComputeProgram::bindUniformBuffer(uint32_t set, uint32_t binding, std::shared_ptr<Buffer> buffer) {
-    // Implement buffer binding
+ComputeProgram::~ComputeProgram() {
 
 }
-
-void ComputeProgram::dispatch(uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ) {
-    // Implement dispatch
-
-}
-
-void ComputeProgram::dispatchIndirect(std::shared_ptr<Buffer> buffer, VkDeviceSize offset) {
-    // Implement indirect dispatch
-
-}
-
-
-void ComputeProgram::wait() {
-    // Implement wait
-
-
-}
-
-ComputeProgram::ComputeProgram(Device& device, const ProgramCreateInfo& createInfo)
-    : m_device(device)
-    , m_createInfo(createInfo) {
-    initialize();
-}
-
-void ComputeProgram::initialize() {
-    // Implement initialization
-
-}
-
-void ComputeProgram::createDescriptorSets() {
-    // Implement descriptor set creation
-
-}
-
-void ComputeProgram::createPipeline() {
-    // Implement pipeline creation
-
-}
-
-void ComputeProgram::cleanup() {
-    // Implement cleanup
-
-}
-
-
-
 
 } // namespace runtime

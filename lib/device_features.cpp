@@ -1,4 +1,7 @@
 #include "device_features.h"
+#include <vulkan/vulkan.h>  
+#include <vector>
+#include <string>
 
 namespace runtime {
     DeviceFeatures::DeviceFeatures(VkPhysicalDevice pd)

@@ -1,34 +1,49 @@
-#pragma once
-#include "memory_manager.h"
+#ifndef BUFFER_ALLOCATOR_H
+#define BUFFER_ALLOCATOR_H
+
+#define VK_NO_PROTOTYPES
 #include <vulkan/vulkan.h>
-#include <memory>
 #include <vk_mem_alloc.h>
+#include <unordered_map>
+#include <memory>
+
 namespace runtime {
-    class BufferAllocator {
-    public:
-        explicit BufferAllocator(std::shared_ptr<MemoryManager> memoryManager);
-        ~BufferAllocator() = default;
 
-        // Prevent copying
-        BufferAllocator(const BufferAllocator&) = delete;
-        BufferAllocator& operator=(const BufferAllocator&) = delete;
+class MemoryManager;
 
-        struct AllocationResult {
-            VkBuffer buffer;
-            VmaAllocation allocation;
-            VmaAllocationInfo allocationInfo;
-        };
+class BufferAllocator {
+public:
+    friend static std::shared_ptr<BufferAllocator> create(VkDevice device, const std::shared_ptr<MemoryManager>& allocator);
+    
 
-        AllocationResult allocateBuffer(const VkBufferCreateInfo& bufferInfo,
-                                    const VmaAllocationCreateInfo& allocInfo);
+    // Create/destroy buffers
+    VkResult createBuffer(VkDeviceSize size, 
+                         VkBufferUsageFlags usage,
+                         VkMemoryPropertyFlags properties,
+                         VkBuffer* buffer);
+    void destroyBuffer(VkBuffer* buffer);
+    
+    // Memory mapping
+    void* mapMemory(VkBuffer* buffer);
+    void unmapMemory(VkBuffer* buffer);
+    void flushCacheToMemory(VkBuffer* buffer, size_t offset, size_t size);
+    void invalidateCache(VkBuffer* buffer, size_t offset, size_t size);
+    
+    explicit BufferAllocator(VkDevice, const std::shared_ptr<MemoryManager>&);    
+    ~BufferAllocator();
+    
+    // Get the device
+    VkDevice getDevice() const;
+private:
 
-        void freeBuffer(VkBuffer buffer, VmaAllocation allocation);
-
-        std::shared_ptr<MemoryManager> getMemoryManager() const { return m_memoryManager; }
-
-    private:
-        std::shared_ptr<MemoryManager> m_memoryManager;
-        VkDevice m_device;
-    };
+    void cleanup();
+    
+    VkDevice m_device;
+    std::shared_ptr<MemoryManager> m_memory_manager{VK_NULL_HANDLE};
+    std::unordered_map<VkBuffer, VmaAllocation> m_allocations;
+    bool m_initialized{false};
+};
 
 } // namespace runtime
+
+#endif // BUFFER_ALLOCATOR_H

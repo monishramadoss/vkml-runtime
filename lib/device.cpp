@@ -7,9 +7,17 @@
 #include "device_features.h"
 #include "buffer_allocator.h"
 #include "queue_manager.h"
+#include "buffer.h"
+#include "descriptor_manager.h"
+#include "compute_packet.h"
 
 namespace runtime
 {
+    static std::shared_ptr<Device> Device::create(VkInstance& instance, VkPhysicalDevice& pd)
+    {
+        return std::make_shared<Device>(instance, pd);
+    }
+
     Device::Device(VkInstance& instance, VkPhysicalDevice& pd)
     {
         initialize(instance, pd);
@@ -82,8 +90,6 @@ namespace runtime
             throw std::runtime_error("Failed to create logical device");
         }
 
-        // Load device function pointers
-        volkLoadDeviceTable(&m_vk_table, m_device);
         
         // Complete queue manager initialization with the device
         m_queue_manager->initialize(m_device);
@@ -108,10 +114,60 @@ namespace runtime
         }
         
         // Create memory manager
-        m_memory_manager = std::make_shared<MemoryManager>(m_allocator, m_device);
+        m_memory_manager = MemoryManager::create(m_allocator, m_device);
         
         // Create buffer allocator
-        m_buffer_allocator = std::make_shared<BufferAllocator>(m_memory_manager);
+        m_buffer_allocator = BufferAllocator::create(m_allocator, m_device);
+
+        // Create descriptor manager
+        m_descriptor_manager = std::make_unique<DescriptorManager>(m_device);
+    }
+
+    uint32_t Device::getComputeQueueFamilyIndex() const {
+        if (!m_queue_manager) {
+            throw std::runtime_error("Queue manager not initialized");
+        }
+        // Get first queue family that supports compute
+        auto queueFamilies = m_queue_manager->findQueueFamilies();
+        if (queueFamilies.empty()) {
+            throw std::runtime_error("No compute queue families found");
+        }
+        return queueFamilies[0];
+    }
+    
+    uint32_t Device::getTransferQueueFamilyIndex() const { 
+        if (!m_queue_manager) {
+            throw std::runtime_error("Queue manager not initialized");
+        }
+        // Get first queue family that supports transfer
+        auto queueFamilies = m_queue_manager->findQueueFamilies();
+        if (queueFamilies.empty()) {
+            throw std::runtime_error("No transfer queue families found");
+        }
+        return queueFamilies[0];
+    }
+    VkQueue Device::getComputeQueue() const {
+        if (!m_queue_manager) {
+            throw std::runtime_error("Queue manager not initialized");
+        }
+        
+        // Get first compute queue
+        uint32_t queueFamilyIndex = getComputeQueueFamilyIndex();
+        auto* dispatcher = m_queue_manager->getQueueDispatcher(queueFamilyIndex);
+        if (!dispatcher) {
+            throw std::runtime_error("No queue dispatcher found for compute queue family");
+        }
+        
+        return dispatcher->getQueue();
+    }
+
+    VkQueue Device::getTransferQueue() const {
+        if(!m_queue_manager) {
+            throw std::runtime_error("Queue manager not initialized");
+        }
+
+        // Get first transfer queue
+
     }
 
     void Device::cleanup() {
@@ -135,16 +191,32 @@ namespace runtime
             vkDestroyDevice(m_device, nullptr);
             m_device = VK_NULL_HANDLE;
         }
+
+        if (m_descriptor_manager) {
+            m_descriptor_manager->destroy();
+            m_descriptor_manager.reset();
+        }
     }
 
-    std::shared_ptr<vkrt_buffer> Device::createBuffer(const VkBufferCreateInfo* bufferInfo, VmaAllocationCreateInfo* allocInfo) {
-        return m_buffer_allocator->allocateBuffer(bufferInfo, allocInfo);
+    std::shared_ptr<Buffer> Device::createStorageBuffer(uint32_t bufferInfo, bool isHostVisible) {
+        return Buffer::createStorageBuffer(m_buffer_allocator, bufferInfo, isHostVisible);
     }
 
-    std::shared_ptr<vkrt_compute_program> Device::createComputeProgram(const std::vector<uint32_t>& code) {
-        // This needs to be implemented based on the ComputeProgram class
-        // Most likely this should be delegated to a shader/program manager
-        return m_memory_manager->createComputeProgram(code);
+    std::shared_ptr<ComputeProgram> Device::createComputeProgram(const std::vector<uint32_t>& code) {
+        if (!m_memory_manager) {
+            throw std::runtime_error("Memory manager not initialized");
+        }
+        
+        ComputeProgram::ProgramCreateInfo info {};
+        info.code = code;
+        info.entryPoint = "main";
+        info.localSizeX = 1;
+        info.localSizeY = 1;
+        info.localSizeZ = 1;
+        info.enablePushConstants = false;
+        info.pushConstantSize = 0;
+
+        return std::make_shared<ComputeProgram>(m_device, info);
     }
 
     void Device::updateDescriptorSets(uint32_t set_id, 
@@ -155,37 +227,19 @@ namespace runtime
     }
 
     void Device::mapBuffer(VmaAllocation alloc, void** data) const {
-        vmaMapMemory(m_allocator, alloc, data);
+        m_memory_manager->mapBuffer(alloc, data);
     }
 
     void Device::unmapBuffer(VmaAllocation alloc) const {
-        vmaUnmapMemory(m_allocator, alloc);
+        m_memory_manager->unmapMemory(alloc);
     }
 
     VkResult Device::copyMemoryToBuffer(VmaAllocation dst, const void* src, size_t size, size_t dst_offset) const {
-        void* mapped_data;
-        VkResult result = vmaMapMemory(m_allocator, dst, &mapped_data);
-        if (result != VK_SUCCESS) {
-            return result;
-        }
-        
-        memcpy(static_cast<char*>(mapped_data) + dst_offset, src, size);
-        vmaUnmapMemory(m_allocator, dst);
-        
-        return VK_SUCCESS;
+        m_memory_manager->copyToMemory(dst, src, size, dst_offset);
     }
 
     VkResult Device::copyBufferToMemory(VmaAllocation src, void* dst, size_t size, size_t src_offset) const {
-        void* mapped_data;
-        VkResult result = vmaMapMemory(m_allocator, src, &mapped_data);
-        if (result != VK_SUCCESS) {
-            return result;
-        }
-        
-        memcpy(dst, static_cast<char*>(mapped_data) + src_offset, size);
-        vmaUnmapMemory(m_allocator, src);
-        
-        return VK_SUCCESS;
+        m_memory_manager->copyFromMemory(src, dst, size, src_offset);
     }
 
     void Device::createEvent(const VkEventCreateInfo* info, VkEvent* event) const {
@@ -201,6 +255,231 @@ namespace runtime
 
     void Device::destroy() {
         cleanup();
+    }
+
+    std::shared_ptr<ComputePacket> Device::construct(const std::vector<uint32_t>& code) {
+        // Forward to memory manager to create the compute program
+        if (!m_memory_manager) {
+            throw std::runtime_error("Memory manager not initialized");
+        }
+        
+        return createComputeProgram(code);
+    }
+
+    void Device::update(uint32_t set_id, 
+                      std::shared_ptr<vkrt_compute_program> program,
+                      const std::vector<std::shared_ptr<vkrt_buffer>>& buffers) {
+        // Delegate to descriptor manager to handle descriptor updates
+        if (!m_descriptor_manager) {
+            throw std::runtime_error("Descriptor manager not initialized");
+        }
+        m_descriptor_manager->updateBufferDescriptors(set_id, program, buffers);
+    }
+
+    // Fix enum definition to use proper C++ enum class
+    enum class BlobField {
+        NAME_SIZE = 0,
+        NAME_START,
+        // Dynamic offset based on name size
+        ARGS_SIZE,
+        ARGS_START,
+        // Rest are payload values
+    };
+
+    void Device::submitBlobs(const std::vector<uint32_t>& blobs) {
+        if (blobs.empty()) {
+            return;
+        }
+
+        // Parse the blob structure
+        uint32_t name_size = blobs[static_cast<size_t>(BlobField::NAME_SIZE)];
+        if (blobs.size() < name_size + 2) { // Ensure we have NAME_SIZE + name + ARGS_SIZE
+            throw std::runtime_error("Invalid blob format: too small");
+        }
+
+        // Extract operation name
+        std::string name;
+        for (size_t i = 0; i < name_size; ++i) {
+            // Properly unpack characters from uint32_t
+            uint32_t value = blobs[static_cast<size_t>(BlobField::NAME_START) + i];
+            name.append(reinterpret_cast<const char*>(&value), sizeof(uint32_t));
+        }
+
+        // Get arguments size and offset
+        uint32_t args_size_offset = static_cast<size_t>(BlobField::NAME_START) + name_size;
+        uint32_t args_size = blobs[args_size_offset];
+        uint32_t args_start = args_size_offset + 1;
+
+        if (blobs.size() < args_start + args_size) {
+            throw std::runtime_error("Invalid blob format: incomplete arguments");
+        }
+
+        // Extract arguments
+        std::vector<uint32_t> args(blobs.begin() + args_start, 
+                                  blobs.begin() + args_start + args_size);
+
+        // Dispatch to appropriate handler based on operation name
+        dispatchOperation(name, args);
+
+    }
+
+private:
+    void dispatchOperation(const std::string& name, const std::vector<uint32_t>& args) {
+        // Map operation names to handlers
+        static const std::unordered_map<std::string, 
+            std::function<void(Device&, const std::vector<uint32_t>&)>> handlers = {
+            {"compute", [](Device& dev, const std::vector<uint32_t>& args) {
+                // Handle compute operation
+                dev.handleComputeOperation(args);
+            }},
+            {"transfer", [](Device& dev, const std::vector<uint32_t>& args) {
+                // Handle transfer operation
+                dev.handleTransferOperation(args);
+            }},
+            // Add more operation handlers as needed
+        };
+
+        auto it = handlers.find(name);
+        if (it != handlers.end()) {
+            it->second(*this, args);
+        } else {
+            throw std::runtime_error("Unknown operation: " + name);
+        }
+    }
+
+    void handleComputeOperation(const std::vector<uint32_t>& args) {
+        if (args.size() < 4) {
+            throw std::runtime_error("Invalid compute operation arguments");
+        }
+        
+        // Parse arguments
+        uint32_t index = 0;
+        
+        // Get program code size and read SPIR-V code
+        uint32_t codeSize = args[index++];
+        if (index + codeSize > args.size()) {
+            throw std::runtime_error("Invalid SPIR-V code size");
+        }
+        std::vector<uint32_t> spirvCode(args.begin() + index, args.begin() + index + codeSize);
+        index += codeSize;
+        
+        // Create compute program from SPIR-V code
+        std::shared_ptr<ComputeProgram> program = createComputeProgram(spirvCode);
+        
+        // Parse dispatch dimensions
+        if (index + 3 > args.size()) {
+            throw std::runtime_error("Missing dispatch dimensions");
+        }
+        uint32_t dispatchX = args[index++];
+        uint32_t dispatchY = args[index++];
+        uint32_t dispatchZ = args[index++];
+        
+        // Parse buffer information
+        if (index >= args.size()) {
+            throw std::runtime_error("Missing buffer count");
+        }
+        uint32_t bufferCount = args[index++];
+        
+        // Collect buffer references
+        std::vector<std::shared_ptr<vkrt_buffer>> buffers;
+        for (uint32_t i = 0; i < bufferCount; ++i) {
+            if (index + 2 > args.size()) {
+                throw std::runtime_error("Insufficient buffer information");
+            }
+            
+            uint32_t bufferId = args[index++];
+            uint32_t bufferSize = args[index++];
+            
+            // Create or retrieve buffer (assuming a simple buffer registry by ID)
+            // In a real implementation, you'd likely have a buffer cache/registry
+            auto buffer = createStorageBuffer(bufferSize, true);
+            buffers.push_back(buffer);
+        }
+        
+        // Update descriptors
+        uint32_t descriptorSetId = 0; // Use default descriptor set
+        update(descriptorSetId, program, buffers);
+        
+        // Execute compute work
+        VkQueue computeQueue = getComputeQueue();
+        uint32_t queueFamilyIndex = getComputeQueueFamilyIndex();
+        
+        // Create command buffer and record commands
+        VkCommandPool commandPool = m_queue_manager->getCommandPool(queueFamilyIndex);
+        
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        allocInfo.commandPool = commandPool;
+        allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        allocInfo.commandBufferCount = 1;
+    }
+
+    void handleTransferOperation(const std::vector<uint32_t>& args) {
+        if (args.size() < 6) {
+            throw std::runtime_error("Invalid transfer operation arguments");
+        }
+        
+        uint32_t index = 0;
+        
+        // Parse transfer type
+        uint32_t transferType = args[index++];
+        enum TransferType {
+            BUFFER_TO_BUFFER = 0,
+            HOST_TO_BUFFER = 1,
+            BUFFER_TO_HOST = 2
+        };
+        
+        // Parse source and destination information
+        uint32_t srcId = args[index++];
+        uint32_t dstId = args[index++];
+        uint32_t size = args[index++];
+        uint32_t srcOffset = args[index++];
+        uint32_t dstOffset = args[index++];
+        
+        // Validate size
+        if (size == 0) {
+            throw std::runtime_error("Transfer size must be greater than zero");
+        }
+        
+        // Handle based on transfer type
+        switch (transferType) {
+            case BUFFER_TO_BUFFER: {
+                // Get source and destination buffers
+                std::shared_ptr<Buffer> srcBuffer = findBuffer(srcId);
+                std::shared_ptr<Buffer> dstBuffer = findBuffer(dstId);
+                
+                if (!srcBuffer || !dstBuffer) {
+                    throw std::runtime_error("Invalid buffer IDs for transfer operation");
+                }
+                
+                // Create and record command buffer for the transfer
+                VkQueue transferQueue = getTransferQueue(); // Or get transfer queue if available
+                uint32_t queueFamilyIndex = getTransferQueueFamilyIndex();
+                VkCommandPool commandPool = m_queue_manager->getCommandPool(queueFamilyIndex);
+                
+                VkCommandBufferAllocateInfo allocInfo{};
+                allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+                allocInfo.commandPool = commandPool;
+                allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+                allocInfo.commandBufferCount = 1;
+                
+                VkCommandBuffer commandBuffer;
+                if (vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer) != VK_SUCCESS) {
+                    throw std::runtime_error("Failed to allocate command buffer for transfer");
+                }
+                break;
+            }
+            case HOST_TO_BUFFER: {
+                // Handle host to buffer transfer
+                break;
+            }
+            case BUFFER_TO_HOST: {
+                // Handle buffer to host transfer
+                break;
+            }
+            default:
+                throw std::runtime_error("Unknown transfer type");
+        }
     }
 
 } // namespace runtime

@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(VKRT_USE_VULKAN_SDK "Use Vulkan SDK" ON)
-option(ENABLE_TEST "Enable Tests" OFF)
+option(ENABLE_TEST "Enable Tests" ON)
 
 if(VKRT_USE_VULKAN_SDK)
     find_package(Vulkan REQUIRED)
@@ -32,12 +32,12 @@ set(SPIRV_REFLECT_EXECUTABLE OFF)
 set(SPIRV_REFLECT_STATIC_LIB ON)
 
 add_subdirectory(ext/SPIRV-Reflect)
-add_subdirectory(ext/volk)
+# add_subdirectory(ext/volk)
 add_subdirectory(ext/VulkanMemoryAllocator)
 
 set(        
     EXT_HEADERS 
-    ext/volk
+    # ext/volk
     ext/VulkanMemoryAllocator/include
     ext/SPIRV-Reflect
     ${Vulkan_INCLUDE_DIRS}
@@ -49,7 +49,7 @@ file(GLOB_RECURSE VKRT_SOURCES lib/*.cpp)
 
 add_library(vkml-rt STATIC ${VKRT_HEADERS} ${VKRT_SOURCES})
 target_include_directories(vkml-rt PUBLIC ${EXT_HEADERS})
-target_link_libraries(vkml-rt PUBLIC volk)
+# target_link_libraries(vkml-rt PUBLIC volk)
 target_link_libraries(vkml-rt PUBLIC VulkanMemoryAllocator)
 target_link_libraries(vkml-rt PUBLIC spirv-reflect-static)
 

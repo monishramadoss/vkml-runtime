@@ -1,121 +1,159 @@
+#ifndef DESCRIPTOR_LAYOUT_CACHE_H
+#define DESCRIPTOR_LAYOUT_CACHE_H
+
 #include <vulkan/vulkan.h>
 #include <volk.h>
-#include <vk_mem_alloc.h>
 #include <unordered_map>
 #include <vector>
 #include <algorithm>
-#include <vector>
 #include <memory>
+#include <functional>
+#include <stdexcept>
 
-namespace runtime{
-class DescriptorLayoutCache
-{
-  public:
-    void destory(VkDevice &device)
-    {
-        for (auto &pair : layoutCache)
-            vkDestroyDescriptorSetLayout(device, pair.second, nullptr);
+namespace runtime {
+
+/**
+ * @brief Cache for Vulkan descriptor set layouts to avoid redundant creation
+ * 
+ * This class maintains a cache of descriptor set layouts to avoid the overhead
+ * of creating duplicate layouts, which is a common occurrence in Vulkan applications.
+ */
+class DescriptorLayoutCache {
+public:
+    DescriptorLayoutCache() = default;
+    
+    ~DescriptorLayoutCache() {
+        // Ensure cache is empty when destroyed
     }
 
-    VkDescriptorSetLayout create_descriptor_layout(VkDevice &device, uint32_t set_number,
-                                                   VkDescriptorSetLayoutCreateInfo *info)
-    {
-        DescriptorLayoutInfo layoutinfo;
-        layoutinfo.set_number = set_number;
-        layoutinfo.bindings.reserve(info->bindingCount);
-        bool isSorted = true;
-        uint32_t lastBinding = 0;
+    /**
+     * @brief Initialize the cache with the device handle
+     * 
+     * @param device The logical device to use for layout creation
+     */
+    void initialize(VkDevice device) {
+        m_device = device;
+    }
 
-        for (uint32_t i = 0; i < info->bindingCount; i++)
-        {
-            layoutinfo.bindings.push_back(info->pBindings[i]);
-            if (info->pBindings[i].binding > lastBinding)
-                lastBinding = info->pBindings[i].binding;
-            else
-                isSorted = false;
+    /**
+     * @brief Destroy all cached descriptor set layouts
+     */
+    void destroy() {
+        if (!m_device) return;
+        
+        for (auto& pair : m_layoutCache) {
+            vkDestroyDescriptorSetLayout(m_device, pair.second, nullptr);
         }
-        if (!isSorted)
-            std::sort(
-                layoutinfo.bindings.begin(), layoutinfo.bindings.end(),
-                [](VkDescriptorSetLayoutBinding &a, VkDescriptorSetLayoutBinding &b) { return a.binding < b.binding; });
+        m_layoutCache.clear();
+    }
 
-        auto it = layoutCache.find(layoutinfo);
-        if (it != layoutCache.end())
-            return (*it).second;
+    /**
+     * @brief Create or retrieve a descriptor set layout from cache
+     * 
+     * @param setNumber Identifier for the set (pipeline slot)
+     * @param createInfo Layout creation configuration
+     * @return VkDescriptorSetLayout The created or cached layout
+     * @throws std::runtime_error if layout creation fails
+     */
+    VkDescriptorSetLayout createDescriptorLayout(uint32_t setNumber, 
+                                                VkDescriptorSetLayoutCreateInfo* createInfo) {
+        if (!m_device) {
+            throw std::runtime_error("DescriptorLayoutCache not initialized with device");
+        }
 
+        // Build layout info object for cache lookup
+        DescriptorLayoutInfo layoutInfo;
+        layoutInfo.setNumber = setNumber;
+        layoutInfo.bindings.reserve(createInfo->bindingCount);
+
+        // Copy and ensure bindings are sorted
+        for (uint32_t i = 0; i < createInfo->bindingCount; i++) {
+            layoutInfo.bindings.push_back(createInfo->pBindings[i]);
+        }
+        
+        // Sort bindings by binding number for consistent lookup
+        std::sort(layoutInfo.bindings.begin(), layoutInfo.bindings.end(),
+            [](const VkDescriptorSetLayoutBinding& a, const VkDescriptorSetLayoutBinding& b) { 
+                return a.binding < b.binding; 
+            });
+
+        // Check if we already have this layout cached
+        auto it = m_layoutCache.find(layoutInfo);
+        if (it != m_layoutCache.end()) {
+            return it->second;
+        }
+
+        // Create new layout
         VkDescriptorSetLayout layout;
-        VkResult result = vkCreateDescriptorSetLayout(device, info, nullptr, &layout);
-        if (result != VK_SUCCESS)
-        {
-            printf("failed to create descriptor set layout\n");
-            return VK_NULL_HANDLE;
+        VkResult result = vkCreateDescriptorSetLayout(m_device, createInfo, nullptr, &layout);
+        if (result != VK_SUCCESS) {
+            throw std::runtime_error("Failed to create descriptor set layout");
         }
-        layoutCache[layoutinfo] = layout;
+        
+        // Cache and return the new layout
+        m_layoutCache[layoutInfo] = layout;
         return layout;
     }
 
-    struct DescriptorLayoutInfo
-    {
-        // good idea to turn this into a inlined array
-        std::vector<VkDescriptorSetLayoutBinding> bindings{};
-        uint32_t set_number = UINT32_MAX;
-        VkDescriptorSetLayoutCreateInfo create_info{};
+private:
+    /**
+     * @brief Internal representation of descriptor set layout for caching
+     */
+    struct DescriptorLayoutInfo {
+        std::vector<VkDescriptorSetLayoutBinding> bindings;
+        uint32_t setNumber = UINT32_MAX;
 
-        bool operator==(const DescriptorLayoutInfo &other) const
-        {
-            if (other.bindings.size() != bindings.size())
-            {
+        bool operator==(const DescriptorLayoutInfo& other) const {
+            if (other.setNumber != setNumber || other.bindings.size() != bindings.size()) {
                 return false;
             }
-            else
-            {
-                if (other.set_number != set_number)
-                    return false;
 
-                for (int i = 0; i < bindings.size(); i++)
-                {
-                    if (other.bindings[i].binding != bindings[i].binding)
-                        return false;
-                    if (other.bindings[i].descriptorType != bindings[i].descriptorType)
-                        return false;
-                    if (other.bindings[i].descriptorCount != bindings[i].descriptorCount)
-                        return false;
-                    if (other.bindings[i].stageFlags != bindings[i].stageFlags)
-                        return false;
+            // Compare all binding properties
+            for (size_t i = 0; i < bindings.size(); i++) {
+                const auto& a = bindings[i];
+                const auto& b = other.bindings[i];
+                
+                if (a.binding != b.binding || 
+                    a.descriptorType != b.descriptorType ||
+                    a.descriptorCount != b.descriptorCount ||
+                    a.stageFlags != b.stageFlags) {
+                    return false;
                 }
-                return true;
             }
+            return true;
         }
 
-        size_t hash() const
-        {
-            using std::hash;
-            using std::size_t;
-
-            size_t result = hash<size_t>()(bindings.size());
-            result ^= hash<uint32_t>()(set_number);
-            for (const VkDescriptorSetLayoutBinding &b : bindings)
-            {
-                size_t binding_hash = static_cast<size_t>(b.binding) | static_cast<size_t>(b.descriptorType << 8) |
-                                      static_cast<size_t>(b.descriptorCount) << 16 |
-                                      static_cast<size_t>(b.stageFlags) << 24;
-                result ^= hash<size_t>()(binding_hash);
+        size_t hash() const {
+            size_t result = std::hash<uint32_t>()(setNumber);
+            
+            // Combine hashes of all bindings
+            for (const auto& binding : bindings) {
+                // Pack binding properties into a hash
+                size_t bindingHash = binding.binding;
+                bindingHash ^= static_cast<size_t>(binding.descriptorType) << 8;
+                bindingHash ^= static_cast<size_t>(binding.descriptorCount) << 16;
+                bindingHash ^= static_cast<size_t>(binding.stageFlags) << 24;
+                
+                // Combine with result using a prime number
+                result ^= bindingHash + 0x9e3779b9 + (result << 6) + (result >> 2);
             }
-
             return result;
         }
     };
 
-  private:
-    struct DescriptorLayoutHash
-    {
-        std::size_t operator()(const DescriptorLayoutInfo &k) const
-        {
+    /**
+     * @brief Hash functor for DescriptorLayoutInfo
+     */
+    struct DescriptorLayoutHash {
+        std::size_t operator()(const DescriptorLayoutInfo& k) const {
             return k.hash();
         }
     };
 
-    std::unordered_map<DescriptorLayoutInfo, VkDescriptorSetLayout, DescriptorLayoutHash> layoutCache{};
+    VkDevice m_device = VK_NULL_HANDLE;
+    std::unordered_map<DescriptorLayoutInfo, VkDescriptorSetLayout, DescriptorLayoutHash> m_layoutCache;
 };
 
 } // namespace runtime
+
+#endif // DESCRIPTOR_LAYOUT_CACHE_H
