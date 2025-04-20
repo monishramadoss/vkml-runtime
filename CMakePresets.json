@@ -31,5 +31,13 @@
             "configurePreset": "win-x64",
             "configuration": "Release"
         }
+    ],
+    "testPresets": [
+        {
+            "name": "unit",
+            "description": "",
+            "displayName": "",
+            "configurePreset": "win-x64"
+        }
     ]
 }

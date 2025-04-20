@@ -1,10 +1,18 @@
 #ifndef ERROR_HANDLING_H
 #define ERROR_HANDLING_H
 
-#include <vulkan/vulkan.h>
+#include "logging.h"
 #include <string>
 #include <string_view>
 #include <stdexcept>
+
+#ifndef VOLK_HH
+#define VOLK_HH
+#define VK_NO_PROTOTYPES
+#include <volk.h>
+#endif // VOLK_HH
+
+constexpr bool isDebugBuild = false;
 
 namespace runtime {
 
@@ -19,7 +27,9 @@ public:
      * @param message Error message
      */
     VulkanError(VkResult result, std::string_view message)
-        : ::std::runtime_error(formatErrorMessage(result, message)), m_result(result) {}
+        : ::std::runtime_error(formatErrorMessage(result, message)), m_result(result) {
+        LOG_ERROR("VulkanError: %s", what());
+    }
     
     /**
      * @brief Get the Vulkan result code
@@ -31,7 +41,10 @@ public:
      * @brief Get the name of the Vulkan result code
      * @return String representation of the VkResult enum
      */
-    [[nodiscard]] const char* resultName() const noexcept;
+    [[nodiscard]] const char *resultName() const noexcept
+    {
+        return vkResultToString(m_result);
+    }
 
 private:
     VkResult m_result;
@@ -41,7 +54,50 @@ private:
         return std::string(message) + " [" + errorName + " (" + std::to_string(result) + ")]";
     }
     
-    static const char* vkResultToString(VkResult result);
+    static const char *vkResultToString(VkResult result)
+    {
+        switch (result)
+        {
+        case VK_SUCCESS:
+            return "VK_SUCCESS";
+        case VK_NOT_READY:
+            return "VK_NOT_READY";
+        case VK_TIMEOUT:
+            return "VK_TIMEOUT";
+        case VK_EVENT_SET:
+            return "VK_EVENT_SET";
+        case VK_EVENT_RESET:
+            return "VK_EVENT_RESET";
+        case VK_INCOMPLETE:
+            return "VK_INCOMPLETE";
+        case VK_ERROR_OUT_OF_HOST_MEMORY:
+            return "VK_ERROR_OUT_OF_HOST_MEMORY";
+        case VK_ERROR_OUT_OF_DEVICE_MEMORY:
+            return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+        case VK_ERROR_INITIALIZATION_FAILED:
+            return "VK_ERROR_INITIALIZATION_FAILED";
+        case VK_ERROR_DEVICE_LOST:
+            return "VK_ERROR_DEVICE_LOST";
+        case VK_ERROR_MEMORY_MAP_FAILED:
+            return "VK_ERROR_MEMORY_MAP_FAILED";
+        case VK_ERROR_LAYER_NOT_PRESENT:
+            return "VK_ERROR_LAYER_NOT_PRESENT";
+        case VK_ERROR_EXTENSION_NOT_PRESENT:
+            return "VK_ERROR_EXTENSION_NOT_PRESENT";
+        case VK_ERROR_FEATURE_NOT_PRESENT:
+            return "VK_ERROR_FEATURE_NOT_PRESENT";
+        case VK_ERROR_INCOMPATIBLE_DRIVER:
+            return "VK_ERROR_INCOMPATIBLE_DRIVER";
+        case VK_ERROR_TOO_MANY_OBJECTS:
+            return "VK_ERROR_TOO_MANY_OBJECTS";
+        case VK_ERROR_FORMAT_NOT_SUPPORTED:
+            return "VK_ERROR_FORMAT_NOT_SUPPORTED";
+        case VK_ERROR_FRAGMENTED_POOL:
+            return "VK_ERROR_FRAGMENTED_POOL";
+        default:
+            return "UNKNOWN_VK_RESULT";
+        }
+    }
 };
 
 /**
@@ -50,7 +106,9 @@ private:
 class MemoryError : public ::std::runtime_error {
 public:
     explicit MemoryError(std::string_view message)
-        : ::std::runtime_error(std::string(message)) {}
+        : ::std::runtime_error(std::string(message)) {
+        LOG_ERROR("MemoryError: %s", what());
+    }
 };
 
 /**
@@ -59,7 +117,9 @@ public:
 class UnsupportedFeatureError : public ::std::runtime_error {
 public:
     explicit UnsupportedFeatureError(std::string_view message)
-        : ::std::runtime_error(std::string(message)) {}
+        : ::std::runtime_error(std::string(message)) {
+        LOG_ERROR("UnsupportedFeatureError: %s", what());
+    }
 };
 
 /**
@@ -71,7 +131,9 @@ public:
  */
 inline void check_result(VkResult result, std::string_view message) {
     if (result != VK_SUCCESS) {
-        throw VulkanError(result, message);
+        LOG_ERROR("Vulkan error: %s [%d]", message.data(), result);
+        if (isDebugBuild)
+            throw VulkanError(result, message);
     }
 }
 
@@ -84,30 +146,22 @@ inline void check_result(VkResult result, std::string_view message) {
  */
 inline void check_condition(bool condition, std::string_view message) {
     if (!condition) {
-        throw std::runtime_error(std::string(message));
+        LOG_ERROR("Condition failed: %s", message.data());
+        if (isDebugBuild)
+            throw std::runtime_error(std::string(message));
     }
 }
 
 // Helper macro for Vulkan error checking
 #define VK_CHECK(x)                                                 \
-    do {                                                            \
-        VkResult err = x;                                           \
-        if (err) {                                                  \
-            std::string errorMsg = std::string("Vulkan error: ") +  \
-                                  std::to_string(err);              \
-            throw std::runtime_error(errorMsg);                   \
-        }                                                           \
-    } while (0)
-
-// Helper class for error handling
-class ErrorHandling {
-public:
-    static void checkVkResult(VkResult result) {
-        if (result != VK_SUCCESS) {
-            throw std::runtime_error("Vulkan error: " + std::to_string(result));
-        }
-    }
-};
+    VkResult err = x;                                               \
+    if (err) {                                                      \
+        std::string errorMsg = std::string("Vulkan error: ") +      \
+                                std::to_string(err);                \
+        LOG_ERROR("%s", errorMsg.c_str());                          \
+        if(isDebugBuild) throw std::runtime_error(errorMsg);        \
+    }                                                               \
+   
 
 } // namespace runtime
 
