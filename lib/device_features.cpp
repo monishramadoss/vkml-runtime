@@ -1,17 +1,38 @@
 #include "device_features.h"
-#include <vulkan/vulkan.h>  
-#include <vector>
-#include <string>
+
+#ifndef VOLK_HH
+#define VOLK_HH
+#define VOLK_IMPLEMENTATION
+#include <volk.h>
+#endif // VOLK_HH
+
 
 namespace runtime {
-    DeviceFeatures::DeviceFeatures(VkPhysicalDevice pd)
+    DeviceFeatures::DeviceFeatures(VkPhysicalDevice& pd)
     {
+        uint32_t layerCount;
+        vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+        m_layers.resize(layerCount);
+        vkEnumerateInstanceLayerProperties(&layerCount, m_layers.data());
+
+
+        uint32_t extensionCount = 0;
+        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extensionCount, nullptr);
+        m_extensions.resize(extensionCount);
+        vkEnumerateDeviceExtensionProperties(pd, nullptr, &extensionCount, m_extensions.data());
+
+
         m_features.features2.pNext = &m_features.features11;
         m_features.features11.pNext = &m_features.features12;
         m_features.features12.pNext = &m_features.features13;
         m_features.features13.pNext = &m_features.coo_matrix_features;
-
+        m_features.coo_matrix_features.pNext = nullptr;
         vkGetPhysicalDeviceFeatures2(pd, &m_features.features2);
+
+        m_properties.device_properties_2.pNext = &m_properties.device_vulkan11_properties;
+        m_properties.device_vulkan11_properties.pNext = &m_properties.device_vulkan12_properties;
+        m_properties.device_vulkan12_properties.pNext = &m_properties.device_vulkan13_properties;
+        m_properties.device_vulkan13_properties.pNext = &m_properties.subgroup_properties;
         vkGetPhysicalDeviceProperties2(pd, &m_properties.device_properties_2);
     }
 
@@ -38,44 +59,46 @@ namespace runtime {
         {
             capabilities.push_back("Int16 Shader");
         }
-        if (m_features.features2.features.shaderInt8)
-        {
-            capabilities.push_back("Int8 Shader");
-        }
-        if (m_features.features2.features.shaderFloat16)
-        {
-            capabilities.push_back("Float16 Shader");
-        }        
+       
+        capabilities.push_back("Int8 Shader");        
+        capabilities.push_back("Float16 Shader");
+               
         return capabilities;
     }
 
-    std::vector<std::string> DeviceFeatures::getSupportedExtensions() const
+    std::vector<const char*> DeviceFeatures::getSupportedLayers() const
     {
-        std::vector<std::string> extensions;
-        uint32_t extensionCount = 0;
-        vkEnumerateDeviceExtensionProperties(m_properties.device_properties_2.properties.deviceID, nullptr, &extensionCount, nullptr);
-        std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-        vkEnumerateDeviceExtensionProperties(m_properties.device_properties_2.properties.deviceID, nullptr, &extensionCount, availableExtensions.data());
-        for (const auto &extension : availableExtensions)
+        std::vector<const char *> layers;
+        for (const auto &layer : m_layers)
+        {
+            layers.push_back(layer.layerName);
+        }
+        return layers;
+    }
+
+    std::vector<const char *> DeviceFeatures::getSupportedExtensions() const
+    {
+        std::vector<const char *> extensions;
+        for (const auto &extension : m_extensions)
         {
             extensions.push_back(extension.extensionName);
         }
         return extensions;
     }
 
-    DeviceType DeviceFeatures::getDeviceType() const
+    DeviceType DeviceFeatures::getDeviceType() const noexcept
     {
         if (m_properties.device_properties_2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU)
         {
-            return DeviceType::Integrated;
+            return DeviceType::IntegratedGPU;
         }
         else if (m_properties.device_properties_2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
         {
-            return DeviceType::Discrete;
+            return DeviceType::DiscreteGPU;
         }
         else if (m_properties.device_properties_2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU)
         {
-            return DeviceType::Virtual;
+            return DeviceType::VirtualGPU;
         }
         else if (m_properties.device_properties_2.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU)
         {
@@ -87,7 +110,7 @@ namespace runtime {
         }
     }
 
-    VendorID DeviceFeatures::getVendorID() const
+    VendorID DeviceFeatures::getVendorID() const noexcept
     {
         if (m_properties.device_properties_2.properties.vendorID == 0x1002)
         {
@@ -176,29 +199,34 @@ namespace runtime {
         return limits;
     }
 
-    size_t DeviceFeatures::getMaxAllocationSize() const
+    size_t DeviceFeatures::getMaxAllocationSize() const noexcept
     {
-        return m_properties.device_properties_2.properties.limits.maxMemoryAllocationSize;
+        return m_properties.device_properties_2.properties.limits.maxStorageBufferRange;
     }
 
-    size_t DeviceFeatures::getSparseAllocationSize() const
+    size_t DeviceFeatures::getSparseAllocationSize() const noexcept
     {
         return m_properties.device_properties_2.properties.limits.sparseAddressSpaceSize;
     }
 
-    bool DeviceFeatures::supportsSparseBinding() const
+    bool DeviceFeatures::supportsSparseBinding() const noexcept
     {
         return m_features.coo_matrix_features.cooperativeMatrix;
     }
 
-    bool DeviceFeatures::supportsSparseResidency() const
+    bool DeviceFeatures::supportsSparseResidency() const noexcept
     {
-        return m_properties.device_properties_2.properties.limits.sparseResidencyBuffer;
+        return false;
     }
 
-    bool DeviceFeatures::supportsSparseResidencyAliased() const
+    bool DeviceFeatures::supportsSparseResidencyAliased() const noexcept
     {
-        return m_properties.device_properties_2.properties.limits.sparseResidencyAliased;
+        return false;
+    }
+
+    std::string DeviceFeatures::getDeviceName() const
+    {
+        return std::string();
     }
 
 

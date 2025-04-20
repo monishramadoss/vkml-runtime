@@ -1,14 +1,29 @@
 #ifndef DEBUG_UTILS_H
 #define DEBUG_UTILS_H
+#include "config.h"
+
 #include <iostream>
 #include <vector>
 #include <algorithm>
 #include <cstring>
-#include <vulkan/vulkan.h>
+#include <volk.h>
+
+#include "logging.h" // Include the logging header
+
 namespace runtime {
 
 class DebugMessenger {
 public:
+    static std::shared_ptr<DebugMessenger> create(VkInstance instance, VkInstanceCreateInfo& createInfo, std::vector<const char*> extensions={})
+    {
+        return std::make_shared<DebugMessenger>(instance, createInfo, extensions);
+    }
+    
+
+    DebugMessenger(VkInstance instance, VkInstanceCreateInfo& createInfo, std::vector<const char*> extensions)
+    {
+        initialize(instance, createInfo, extensions, &m_debugMessenger);
+    } 
     // Change from constexpr std::vector to inline static array
     inline static const char* VALIDATION_LAYERS[] = {
         "VK_LAYER_KHRONOS_validation"
@@ -23,7 +38,23 @@ public:
         const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
         void* pUserData)
     {
-        std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
+        // Replace std::cerr with logger
+        switch (messageSeverity) {
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT:
+                LOG_DEBUG("validation layer: %s", pCallbackData->pMessage);
+                break;
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT:
+                LOG_INFO("validation layer: %s", pCallbackData->pMessage);
+                break;
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT:
+                LOG_WARNING("validation layer: %s", pCallbackData->pMessage);
+                break;
+            case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:
+                LOG_ERROR("validation layer: %s", pCallbackData->pMessage);
+                break;
+            default:
+                break;
+        }
         return VK_FALSE;
     }
 
@@ -44,26 +75,26 @@ public:
     }
 
     // Add overload for instance member version
-    VkResult create(
+    VkResult _create(
         VkInstance instance,
         const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, 
         const VkAllocationCallbacks* pAllocator)
     {
         auto func = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-            ::vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+            vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
         return func ? func(instance, pCreateInfo, pAllocator, &m_debugMessenger)
                    : VK_ERROR_EXTENSION_NOT_PRESENT;
     }
 
     // Keep static version for backward compatibility
-    static VkResult create(
+    static VkResult _create(
         VkInstance instance,
         VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo,
         const VkAllocationCallbacks* pAllocator,
         VkDebugUtilsMessengerEXT* pDebugMessenger)
     {
         auto func = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
-            ::vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
+            vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
         return func ? func(instance, pCreateInfo, pAllocator, pDebugMessenger)
                    : VK_ERROR_EXTENSION_NOT_PRESENT;
     }
@@ -72,25 +103,14 @@ public:
     void destroy(VkInstance instance, const VkAllocationCallbacks* pAllocator = nullptr) 
     {
         auto func = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-            ::vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
+            vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
         if (func && m_debugMessenger != VK_NULL_HANDLE) {
             func(instance, m_debugMessenger, pAllocator);
             m_debugMessenger = VK_NULL_HANDLE;
         }
     }
 
-    // Keep static version for backward compatibility
-    static void destroy(
-        VkInstance instance,
-        VkDebugUtilsMessengerEXT debugMessenger,
-        const VkAllocationCallbacks* pAllocator)
-    {
-        auto func = reinterpret_cast<PFN_vkDestroyDebugUtilsMessengerEXT>(
-            ::vkGetInstanceProcAddr(instance, "vkDestroyDebugUtilsMessengerEXT"));
-        if (func) func(instance, debugMessenger, pAllocator);
-    }
-
-    static void setupDebugMessenger(VkInstance instance, 
+    static void initialize(VkInstance instance, 
                                    VkInstanceCreateInfo& createInfo,
                                    std::vector<const char*>& extensions,
                                    VkDebugUtilsMessengerEXT* debugMessenger) {
@@ -107,7 +127,8 @@ public:
             createInfo.ppEnabledExtensionNames = extensions.data();
             createInfo.pNext = &debugCreateInfo;
 
-            if (create(instance, &debugCreateInfo, nullptr, debugMessenger) != VK_SUCCESS) {
+            if (_create(instance, &debugCreateInfo, nullptr, debugMessenger) != VK_SUCCESS)
+            {
                 throw std::runtime_error("Failed to create debug messenger");
             }
         } else {
@@ -118,11 +139,19 @@ public:
 
     static bool checkValidationLayerSupport() {
 #ifdef _DEBUG
-        uint32_t layerCount;
-        vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+        uint32_t layerCount = 0;
+        VkResult result = VK_INCOMPLETE;// vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
+        if (result != VK_SUCCESS) {
+            LOG_ERROR("Failed to enumerate instance layer properties: %d", result);
+            return false;
+        }
 
         std::vector<VkLayerProperties> availableLayers(layerCount);
-        vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+        result = vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
+        if (result != VK_SUCCESS) {
+            LOG_ERROR("Failed to enumerate instance layer properties: %d", result);
+            return false;
+        }
 
         // Update to use the array elements directly
         const size_t validationLayerCount = sizeof(VALIDATION_LAYERS) / sizeof(VALIDATION_LAYERS[0]);
@@ -139,10 +168,12 @@ public:
             }
             
             if (!layerFound) {
+                LOG_WARNING("Validation layer '%s' not found", layerName);
                 return false;
             }
         }
         
+        LOG_DEBUG("All requested validation layers are available");
         return true;
 #else
         return false;

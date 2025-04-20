@@ -1,7 +1,12 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#include <vulkan/vulkan.h>
+#ifndef VOLK_HH
+#define VOLK_HH
+#define VK_NO_PROTOTYPES
+#include <volk.h>
+#endif // VOLK_HH
+
 #include <string>
 
 namespace runtime {

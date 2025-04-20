@@ -1,17 +1,19 @@
 
-project(rt_test)
+project(vkml_rt_test)
 
-add_executable(rt_test
-	rt.cpp
+add_executable(init_test
+	init.cpp
 )
+
 add_executable(shader_test 
-	"square.cpp"
+	square.cpp
 )
 
-target_link_libraries(rt_test PRIVATE rt)
-target_link_libraries(shader_test PRIVATE rt)
-add_test(NAME rt_test COMMAND rt_test)
+target_link_libraries(init_test PRIVATE vkml-rt)
+target_link_libraries(shader_test PRIVATE vkml-rt)
+
+add_test(NAME init_test COMMAND init_test)
 add_test(NAME shader_test COMMAND shader_test)
 
-set_property(TARGET rt_test PROPERTY FOLDER test)
+set_property(TARGET init_test PROPERTY FOLDER test)
 set_property(TARGET shader_test PROPERTY FOLDER test)

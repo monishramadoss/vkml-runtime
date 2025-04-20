@@ -16,13 +16,8 @@ if(VKRT_USE_VULKAN_SDK)
     else ()
         set(ENV{VULKAN_SDK} ENV{VK_LAYER_PATH})
         message( "Vulkan SDK found: $VULKAN_SDK")
-
     endif()
-
 endif()
-
-
-
 
 if (WIN32)
    set(VOLK_STATIC_DEFINES VK_USE_PLATFORM_WIN32_KHR)
@@ -32,12 +27,12 @@ set(SPIRV_REFLECT_EXECUTABLE OFF)
 set(SPIRV_REFLECT_STATIC_LIB ON)
 
 add_subdirectory(ext/SPIRV-Reflect)
-# add_subdirectory(ext/volk)
+add_subdirectory(ext/volk)
 add_subdirectory(ext/VulkanMemoryAllocator)
 
 set(        
     EXT_HEADERS 
-    # ext/volk
+    volk_headers
     ext/VulkanMemoryAllocator/include
     ext/SPIRV-Reflect
     ${Vulkan_INCLUDE_DIRS}
@@ -49,14 +44,15 @@ file(GLOB_RECURSE VKRT_SOURCES lib/*.cpp)
 
 add_library(vkml-rt STATIC ${VKRT_HEADERS} ${VKRT_SOURCES})
 target_include_directories(vkml-rt PUBLIC ${EXT_HEADERS})
-# target_link_libraries(vkml-rt PUBLIC volk)
+
+target_link_libraries(vkml-rt PUBLIC volk)
 target_link_libraries(vkml-rt PUBLIC VulkanMemoryAllocator)
 target_link_libraries(vkml-rt PUBLIC spirv-reflect-static)
 
 
 set_property(GLOBAL PROPERTY VKRT_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/inc ${EXT_HEADERS})
 
-if(ENABLE_TEST)
+# if(ENABLE_TEST)
     enable_testing()
     add_subdirectory(test)
-endif()
+# endif()
