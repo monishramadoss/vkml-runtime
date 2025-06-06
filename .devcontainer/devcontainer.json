@@ -1,20 +1,19 @@
 {
-"image": "mcr.microsoft.com/devcontainers/universal:2",
-"hostRequirements": {
-"cpus": 2
-},
-"waitFor": "onCreateCommand",
-"updateContentCommand": "",
-"postCreateCommand": "",
-"customizations": {
-"codespaces": {
-"openFiles": []
-},
-"vscode": {
-"extensions": [
-"ms-toolsai.jupyter",
-"ms-python.python"
-]
-}
-}
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "hostRequirements": {
+    "cpus": 2
+  },
+  "waitFor": "onCreateCommand",
+  "updateContentCommand": "sudo apt-get install -y libvulkan-dev vulkan-tools vulkan-utility-libraries-dev",
+  "postCreateCommand": "",
+  "customizations": {
+    "codespaces": {
+      "openFiles": []
+    },
+    "vscode": {
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
+  }
 }
