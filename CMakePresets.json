@@ -13,6 +13,17 @@
                 "CMAKE_C_COMPILER": "cl.exe",
                 "CMAKE_CXX_COMPILER": "cl.exe"
             }
+        },
+        {
+            "name": "linux-clang",
+            "description": "Using compilers: C = /usr/bin/clang, CXX = /usr/bin/clang++",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "/usr/bin/clang",
+                "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
         }
     ],
     "buildPresets": [
@@ -29,6 +40,21 @@
         {
             "name": "win-x64-Release",
             "configurePreset": "win-x64",
+            "configuration": "Release"
+        },
+        { 
+            "name": "linux-clang-debug",
+            "configurePreset": "linux-clang",
+            "configuration": "Debug"
+        },
+        {
+            "name": "linux-clang-relWithDebInfo",
+            "configurePreset": "linux-clang",
+            "configuration": "RelWithDebInfo"
+        },
+        {
+            "name": "linux-clang-Release",
+            "configurePreset": "linux-clang",
             "configuration": "Release"
         }
     ],

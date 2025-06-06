@@ -204,13 +204,13 @@ namespace runtime
         auto extensionNames = m_features->getSupportedExtensions();
         const char *vk_ext_name = "VK_EXT_buffer_device_address";
         auto it = std::find_if(extensionNames.begin(), extensionNames.end(),
-                               [vk_ext_name](const char *str) { return std::strcmp(str, vk_ext_name) == 0;
+                               [vk_ext_name](const char *str) { return strcmp(str, vk_ext_name) == 0;
             });
         if (it != extensionNames.end())
         {
             extensionNames.erase(
                 std::remove_if(extensionNames.begin(), extensionNames.end(),
-                               [vk_ext_name](const char *str) { return std::strcmp(str, vk_ext_name) == 0; }),
+                               [vk_ext_name](const char *str) { return strcmp(str, vk_ext_name) == 0; }),
                                  extensionNames.end());
         }
         createInfo.ppEnabledExtensionNames = extensionNames.data();

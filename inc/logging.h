@@ -32,7 +32,11 @@ public:
         if (level > m_level) return;
         
         char buffer[1024];
-        snprintf(buffer, sizeof(buffer), format, args...);
+        if (sizeof...(args) == 0) {
+            snprintf(buffer, sizeof(buffer), "%s", format);
+        } else {
+            snprintf(buffer, sizeof(buffer), format, args...);
+        }
         logMessage(level, buffer);
     }
     

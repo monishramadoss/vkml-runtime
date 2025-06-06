@@ -16,7 +16,7 @@ int main()
     auto dev1 = app->getDevice(1);
     auto buf0 = dev1->createWorkingBuffer(size);
     auto buf1 = dev1->createWorkingBuffer(size);
-    auto ptr = dev0->createWorkingBuffer(data.size() * sizeof uint32_t, 0);
+    auto ptr = dev0->createWorkingBuffer(data.size() * sizeof(uint32_t), 0);
     
     std::vector<uint32_t> code(square, square + (sizeof(square) / sizeof(uint32_t)));
        

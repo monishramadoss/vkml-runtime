@@ -51,7 +51,7 @@ void Logger::clearMessages()
 }
 
 
-void Logger::logMessage(enum class LogLevel level, const std::string& message)
+void Logger::logMessage(LogLevel level, const std::string& message)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     
