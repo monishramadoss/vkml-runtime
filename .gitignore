@@ -3,3 +3,6 @@ out/
 .aider*
 /build
 .vscode
+*.foz
+/Testing
+build_output.txt

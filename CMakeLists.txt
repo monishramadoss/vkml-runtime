@@ -50,6 +50,11 @@ target_link_libraries(vkml-rt PUBLIC volk)
 target_link_libraries(vkml-rt PUBLIC VulkanMemoryAllocator)
 target_link_libraries(vkml-rt PUBLIC spirv-reflect-static)
 
+get_target_property(LINK_LIBRARIES vkml-rt INTERFACE_LINK_LIBRARIES)
+message(STATUS "Linking these libraries:")
+foreach(target_link_lib ${LINK_LIBRARIES})
+    message(STATUS "  ${target_link_lib}")
+endforeach()
 
 set_property(GLOBAL PROPERTY VKRT_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/inc ${EXT_HEADERS})
 

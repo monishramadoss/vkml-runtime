@@ -329,6 +329,18 @@ void Buffer::copyDataTo(std::shared_ptr<Buffer> dst, size_t size, size_t dst_off
 void Buffer::initialize(std::shared_ptr<MemoryManager> &device, size_t size, VkBufferUsageFlags usage,
                         VmaMemoryUsage memory_usage, VmaAllocationCreateFlags flags)
 {
+    // If mapping is required, force host-preferred memory usage
+    bool mapping_required = (flags & (VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT));
+    if (memory_usage == VMA_MEMORY_USAGE_AUTO && mapping_required) {
+        memory_usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+    }
+    // Ensure host access flag is set for AUTO usage if mapping is required
+    if (memory_usage == VMA_MEMORY_USAGE_AUTO || memory_usage == VMA_MEMORY_USAGE_AUTO_PREFER_HOST) {
+        if ((flags & (VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT)) == 0 && mapping_required) {
+            // Default to sequential write for upload/staging buffers
+            flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        }
+    }
     VkBufferCreateInfo bufferInfo = {};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
@@ -339,6 +351,9 @@ void Buffer::initialize(std::shared_ptr<MemoryManager> &device, size_t size, VkB
     allocInfo.usage = memory_usage;
     m_memory_manager->buildBuffer(bufferInfo, allocInfo, m_buffer, m_allocation, m_allocation_info);
     m_memory_manager->getVmaMemoryAllocationProperotys(m_allocation, &m_memory_property_flags);
+    if (mapping_required && !(m_memory_property_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+        LOG_ERROR("Buffer allocated without HOST_VISIBLE memory but mapping was requested. Allocation will fail. Consider using a staging buffer or adjusting allocation flags.");
+    }
     m_write_descriptor_set.buffer = m_buffer;
     m_write_descriptor_set.offset = 0;
     m_write_descriptor_set.range = size;
@@ -370,6 +385,17 @@ SparseBuffer::SparseBuffer(std::shared_ptr<MemoryManager> &mem_mamanger, size_t 
 void SparseBuffer::initialize(std::shared_ptr<MemoryManager> &mem_mamanger, size_t size, VkBufferUsageFlags usage,
                               VmaMemoryUsage memory_usage, VmaAllocationCreateFlags flags)
 {
+    // If mapping is required, force host-preferred memory usage
+    bool mapping_required = (flags & (VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT));
+    if (memory_usage == VMA_MEMORY_USAGE_AUTO && mapping_required) {
+        memory_usage = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+    }
+    // Ensure host access flag is set for AUTO usage if mapping is required
+    if (memory_usage == VMA_MEMORY_USAGE_AUTO || memory_usage == VMA_MEMORY_USAGE_AUTO_PREFER_HOST) {
+        if ((flags & (VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT)) == 0 && mapping_required) {
+            flags |= VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+        }
+    }
     VkBufferCreateInfo bufferInfo = {};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = size;
@@ -381,26 +407,12 @@ void SparseBuffer::initialize(std::shared_ptr<MemoryManager> &mem_mamanger, size
     allocInfo.usage = memory_usage;
     allocInfo.flags = flags;
     m_memory_manager->buildBuffer(bufferInfo, allocInfo, m_buffer, m_allocation, m_allocation_info);
-
-    // Bind sparse memory
-    VkSparseMemoryBind sparseMemoryBind = {};
-    sparseMemoryBind.resourceOffset = 0;
-    sparseMemoryBind.size = m_allocation_info.size;
-    sparseMemoryBind.memory = m_allocation_info.deviceMemory;
-    sparseMemoryBind.memoryOffset = m_allocation_info.offset;
-
-    VkSparseBufferMemoryBindInfo sparseBufferMemoryBindInfo = {};
-    sparseBufferMemoryBindInfo.buffer = m_buffer;
-    sparseBufferMemoryBindInfo.bindCount = 1;
-    sparseBufferMemoryBindInfo.pBinds = &sparseMemoryBind;
-
-    VkBindSparseInfo bindSparseInfo = {};
-    bindSparseInfo.sType = VK_STRUCTURE_TYPE_BIND_SPARSE_INFO;
-    bindSparseInfo.bufferBindCount = 1;
-    bindSparseInfo.pBufferBinds = &sparseBufferMemoryBindInfo;
-    m_queue = m_memory_manager->getSparseQueue();
-    vkQueueBindSparse(m_queue, 1, &bindSparseInfo, VK_NULL_HANDLE);
-
+    m_memory_manager->getVmaMemoryAllocationProperotys(m_allocation, &m_memory_property_flags);
+    // RUNTIME CHECK: Ensure buffer is host-visible if mapping is required
+    if ((flags & (VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT)) &&
+        !(m_memory_property_flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+        LOG_ERROR("SparseBuffer allocated without HOST_VISIBLE memory but mapping was requested. Allocation will fail. Consider using a staging buffer or adjusting allocation flags.");
+    }
 }
 
 void SparseBuffer::cleanup()
